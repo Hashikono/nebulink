@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Full-Span Text Spectrogram Watermarker</title>
+<style>
+  :root { --gap: 12px; --pad: 14px; --radius: 10px; font-family: ui-sans-serif, system-ui, Segoe UI, Roboto, Helvetica, Arial; }
+  body { margin:0; padding:24px; background:#0b0d12; color:#e9eef7; }
+  h1 { font-size:1.25rem; margin:0 0 8px; }
+  p.hint { margin:6px 0 18px; color:#b9c5d6; }
+  .card { background:#121622; border:1px solid #1d2435; border-radius:var(--radius); padding:var(--pad); margin-bottom:16px; }
+  .row { display:flex; gap:var(--gap); flex-wrap:wrap; }
+  .col { flex:1 1 260px; min-width:240px; }
+  label { display:block; font-size:.9rem; margin:8px 0 6px; color:#c9d6ea; }
+  input[type="text"], input[type="number"] { width:100%; box-sizing:border-box; padding:10px; border-radius:8px; border:1px solid #24314a; background:#0e1320; color:#e9eef7; }
+  input[type="range"] { width:100%; }
+  input[type="file"] { width:100%; }
+  button { cursor:pointer; padding:10px 14px; border-radius:8px; border:1px solid #2a3a5e; background:#1b2540; color:#e9eef7; }
+  button.primary { background:#2a3a5e; }
+  .actions { display:flex; gap:var(--gap); flex-wrap:wrap; align-items:center; }
+  canvas { width:100%; height:auto; background:#000; border-radius:8px; border:1px solid #1d2435; }
+  .small { font-size:.85rem; color:#9eb1d0; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:999px; background:#1b2540; font-size:.8rem; border:1px solid #2a3a5e; margin-left:6px;}
+  .progress { height:8px; background:#0e1320; border:1px solid #1d2435; border-radius:999px; overflow:hidden; }
+  .bar { height:100%; width:0%; background:#4a7dff; transition:width .2s; }
+  a.dl { color:#9ec3ff; }
+</style>
+</head>
+<body>
+  <h1>Full-Span Text Spectrogram Watermarker <span class="pill mono">client-side</span></h1>
+  <p class="hint">Embeds your text into an audio file’s spectrogram by adding faint, high-frequency tones shaped like the letters—stretched across the <em>entire</em> audio length. Nothing uploads; all processing happens in your browser.</p>
+
+  <div class="card">
+    <div class="row">
+      <div class="col">
+        <label>Audio file (WAV/MP3/MP4/M4A/OGG/WEBM)</label>
+        <input id="file" type="file" accept="audio/*,video/*" />
+        <div class="small" style="margin-top:6px;">Decoded: <span id="info">—</span></div>
+        <div class="row" style="margin-top:8px;">
+          <button id="playOriginal" disabled>▶︎ Play original</button>
+          <button id="stop" disabled>⏹ Stop</button>
+        </div>
+      </div>
+
+      <div class="col">
+        <label>Text to embed</label>
+        <input id="text" type="text" placeholder="HELLO WORLD" value="HELLO WORLD" />
+        <div class="row">
+          <div class="col">
+            <label>Mask height (frequency bins)</label>
+            <input id="maskH" type="number" min="64" max="512" step="16" value="224" />
+            <div class="small">Taller = thicker letters (more freqs)</div>
+          </div>
+          <div class="col">
+            <label>Start time (seconds)</label>
+            <input id="start" type="number" step="0.01" min="0" value="0" />
+            <div class="small">Usually 0 to span from the beginning</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col">
+        <label>Frequency band (Hz)</label>
+        <div class="row">
+          <div class="col"><input id="fmin" type="number" value="14000" /></div>
+          <div class="col"><input id="fmax" type="number" value="18000" /></div>
+        </div>
+        <div class="small">Keep high to minimize audibility; ensure your spectrogram view includes this range.</div>
+
+        <label style="margin-top:10px;">Strength</label>
+        <input id="strength" type="range" min="0" max="1" step="0.01" value="0.28" />
+        <div class="small">Raise if the text looks faint in the spectrogram.</div>
+
+        <div class="row" style="margin-top:10px;">
+          <button id="renderMask">Render text mask</button>
+          <button id="embed" class="primary" disabled>Embed & build WAV</button>
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <button id="playOut" disabled>▶︎ Play result</button>
+          <a id="download" class="dl" href="#" download="watermarked.wav" style="display:none;">⬇︎ Download WAV</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="progress" style="margin-top:12px;" aria-hidden="true"><div id="bar" class="bar"></div></div>
+    <div class="small" style="margin-top:10px;">Text mask preview (this is the pattern mapped across your chosen frequency band):</div>
+    <canvas id="mask" width="600" height="224"></canvas>
+  </div>
+
+  <div class="card">
+    <strong>Spectrogram tips</strong>
+    <ul>
+      <li>In Audacity: <span class="mono">Track ▸ Spectrogram ▸ Spectrogram Settings…</span> set FFT 4096, Hann, and show the band you chose (e.g., 14–18 kHz).</li>
+      <li>If you hear the tones, raise <em>fmin/fmax</em> or lower <em>Strength</em>.</li>
+      <li>For very long audio, the mask canvas can be wide—zoom out or shrink the browser width; the audio watermark still spans the full duration.</li>
+    </ul>
+  </div>
+
+<script>
+(() => {
+  const $ = sel => document.querySelector(sel);
+
+  // Elements
+  const fileEl = $('#file'), textEl = $('#text'), maskHEl = $('#maskH');
+  const startEl = $('#start'), strengthEl = $('#strength');
+  const fminEl = $('#fmin'), fmaxEl = $('#fmax');
+  const renderMaskBtn = $('#renderMask'), embedBtn = $('#embed');
+  const playOrigBtn = $('#playOriginal'), playOutBtn = $('#playOut'), stopBtn = $('#stop');
+  const dl = $('#download'), info = $('#info'), bar = $('#bar');
+  const maskCanvas = $('#mask'), mctx = maskCanvas.getContext('2d', { willReadFrequently: true });
+
+  // State
+  let audioCtx;
+  let decoded = null;      // AudioBuffer (original)
+  let resultBuffer = null; // AudioBuffer (watermarked)
+  let playingNode = null;
+
+  // Helpers
+  function clamp(v, min, max){ return Math.min(max, Math.max(min, v)); }
+  function setProgress(frac){ bar.style.width = (100 * clamp(frac,0,1)).toFixed(1) + '%'; }
+
+  function initAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+
+  function stopPlayback() {
+    try { playingNode && playingNode.stop(); } catch(_) {}
+    playingNode = null;
+    stopBtn.disabled = true;
+  }
+
+  function playBuffer(buf) {
+    initAudio();
+    stopPlayback();
+    const src = audioCtx.createBufferSource();
+    src.buffer = buf;
+    src.connect(audioCtx.destination);
+    src.start();
+    playingNode = src;
+    stopBtn.disabled = false;
+    src.onended = () => stopPlayback();
+  }
+
+  async function decodeSelectedFile(file) {
+    initAudio();
+    const buf = await file.arrayBuffer();
+    return new Promise((resolve,reject) => {
+      audioCtx.decodeAudioData(buf, resolve, reject);
+    });
+  }
+
+  // Draw a big, full-span text mask whose width matches the full audio duration
+  function drawMask() {
+    if (!decoded) return;
+    const bins = clamp(parseInt(maskHEl.value || '224', 10), 64, 512);
+
+    // Canvas width (pixels) = duration * pixels-per-second
+    // Choose a fairly dense pps so letters look smooth in the spectrogram.
+    const PPS = 180; // increase if you want even finer horizontal detail
+    const dur = decoded.duration;
+    const width = Math.max(80, Math.round(dur * PPS));
+
+    maskCanvas.height = bins;
+    maskCanvas.width = width;
+
+    // Background
+    mctx.fillStyle = '#000';
+    mctx.fillRect(0, 0, width, bins);
+
+    // Auto-scale font to ~80% of canvas height
+    const fontSize = Math.floor(bins * 0.8);
+    mctx.fillStyle = '#fff';
+    mctx.textAlign = 'center';
+    mctx.textBaseline = 'middle';
+    mctx.font = `bold ${fontSize}px Arial`;
+
+    const text = textEl.value || '';
+    // If text is extremely long vs width, shrink font to fit ~90% of width
+    const metrics = mctx.measureText(text);
+    if (metrics.width > width * 0.9) {
+      const scale = (width * 0.9) / metrics.width;
+      const newSize = Math.max(10, Math.floor(fontSize * scale));
+      mctx.font = `bold ${newSize}px Arial`;
+    }
+
+    // Draw centered
+    mctx.fillText(text, width / 2, bins / 2);
+
+    // Optional cleanup: simple threshold to get crisper edges
+    const img = mctx.getImageData(0, 0, width, bins);
+    const data = img.data;
+    for (let i=0; i<data.length; i+=4) {
+      const v = data[i] > 160 ? 255 : 0;
+      data[i]=data[i+1]=data[i+2]=v; data[i+3]= v ? 255 : 0;
+    }
+    mctx.putImageData(img, 0, 0);
+  }
+
+  // Synthesize watermark signal that spans the entire audio
+  function synthesizeTextSignal(sampleRate) {
+    const width = maskCanvas.width, height = maskCanvas.height;
+    const img = mctx.getImageData(0, 0, width, height).data;
+
+    const totalSamples = Math.max(1, Math.round(decoded.duration * sampleRate));
+    const fmin = parseFloat(fminEl.value || '14000');
+    let fmax = parseFloat(fmaxEl.value || '18000');
+
+    // Safety: cap to Nyquist - small headroom
+    const nyqCap = sampleRate / 2 - 200;
+    if (fmax > nyqCap) { fmax = Math.floor(nyqCap); fmaxEl.value = String(fmax); }
+
+    // How many samples per mask column
+    const perColumn = Math.max(1, Math.floor(totalSamples / width));
+    const remainder = totalSamples - perColumn * width;
+
+    const out = new Float32Array(totalSamples);
+    let sampleIndex = 0;
+    const twoPi = 2 * Math.PI;
+
+    for (let x=0; x<width; x++) {
+      // Collect active freqs for this column
+      const freqs = [];
+      for (let y=0; y<height; y++) {
+        const idx = (y * width + x) * 4;
+        if (img[idx] > 0) {
+          const yn = 1 - (y / (height - 1));
+          const f = fmin + yn * (fmax - fmin);
+          freqs.push(f);
+        }
+      }
+
+      const segLen = perColumn + (x < remainder ? 1 : 0);
+      if (segLen <= 0) continue;
+
+      for (let n=0; n<segLen; n++) {
+        const t = (sampleIndex + n) / sampleRate;
+        let s = 0;
+        const L = freqs.length;
+        if (L) {
+          // Average of sines so thicker strokes don't get louder
+          for (let k=0; k<L; k++) s += Math.sin(twoPi * freqs[k] * t);
+          s /= L;
+        }
+        out[sampleIndex + n] = s;
+      }
+      sampleIndex += segLen;
+
+      if ((x & 63) === 0) setProgress(sampleIndex / totalSamples * 0.6);
+    }
+    setProgress(0.6);
+    return out;
+  }
+
+  // Mix watermark into each channel + normalize gently if needed
+  function mixIntoAudio(textSignal, startSec, strength) {
+    const sr = decoded.sampleRate;
+    const startSample = Math.max(0, Math.floor(startSec * sr));
+    const endSample = startSample + textSignal.length;
+    const outLen = Math.max(decoded.length, endSample);
+
+    const numChannels = decoded.numberOfChannels;
+    const outChans = [];
+    for (let c=0; c<numChannels; c++) {
+      const src = decoded.getChannelData(c);
+      const out = new Float32Array(outLen);
+      out.set(src, 0);
+
+      for (let i=0; i<textSignal.length; i++) {
+        const idx = startSample + i;
+        if (idx < outLen) out[idx] += strength * textSignal[i];
+      }
+      outChans.push(out);
+    }
+
+    // Normalize if we clipped
+    let peak = 0;
+    for (let c=0; c<outChans.length; c++) {
+      const ch = outChans[c];
+      for (let i=0; i<ch.length; i++) {
+        const a = Math.abs(ch[i]);
+        if (a > peak) peak = a;
+      }
+    }
+    if (peak > 1) {
+      const g = 1 / peak;
+      for (let c=0; c<outChans.length; c++) {
+        const ch = outChans[c];
+        for (let i=0; i<ch.length; i++) ch[i] *= g;
+      }
+    }
+    return outChans;
+  }
+
+  // Utilities to build a WAV blob
+  function interleaveChannels(channels) {
+    const length = channels[0].length;
+    const numChannels = channels.length;
+    const out = new Float32Array(length * numChannels);
+    for (let i=0, j=0; i<length; i++) {
+      for (let c=0; c<numChannels; c++) out[j++] = channels[c][i];
+    }
+    return out;
+  }
+  function floatTo16BitPCM(float32) {
+    const out = new Int16Array(float32.length);
+    for (let i=0;i<float32.length;i++) {
+      let s = Math.max(-1, Math.min(1, float32[i]));
+      out[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+    return out;
+  }
+  function writeWavFile(interleaved, sampleRate, numChannels) {
+    const bytesPerSample = 2;
+    const blockAlign = numChannels * bytesPerSample;
+    const byteRate = sampleRate * blockAlign;
+    const dataSize = interleaved.length * bytesPerSample;
+
+    const buffer = new ArrayBuffer(44 + dataSize);
+    const view = new DataView(buffer);
+
+    let p = 0;
+    function writeString(s){ for(let i=0;i<s.length;i++) view.setUint8(p++, s.charCodeAt(i)); }
+    function writeUint32(v){ view.setUint32(p, v, true); p+=4; }
+    function writeUint16(v){ view.setUint16(p, v, true); p+=2; }
+
+    writeString('RIFF');
+    writeUint32(36 + dataSize);
+    writeString('WAVE');
+    writeString('fmt ');
+    writeUint32(16);
+    writeUint16(1); // PCM
+    writeUint16(numChannels);
+    writeUint32(sampleRate);
+    writeUint32(byteRate);
+    writeUint16(blockAlign);
+    writeUint16(16); // bits
+    writeString('data');
+    writeUint32(dataSize);
+
+    const pcm = floatTo16BitPCM(interleaved);
+    for (let i=0;i<pcm.length;i++) view.setInt16(44 + i*2, pcm[i], true);
+    return new Blob([view], { type:'audio/wav' });
+  }
+
+  function channelsToAudioBuffer(channels, sampleRate) {
+    initAudio();
+    const buf = audioCtx.createBuffer(channels.length, channels[0].length, sampleRate);
+    for (let c=0; c<channels.length; c++) buf.getChannelData(c).set(channels[c]);
+    return buf;
+  }
+
+  async function doEmbed() {
+    if (!decoded) return;
+    setProgress(0.05);
+
+    const sr = decoded.sampleRate;
+    const startSec = Math.max(0, parseFloat(startEl.value || '0'));
+    const strength = clamp(parseFloat(strengthEl.value || '0.28'), 0, 1);
+
+    // (Re)build mask in case params changed
+    drawMask();
+
+    const textSignal = synthesizeTextSignal(sr);
+    setProgress(0.75);
+
+    const channels = mixIntoAudio(textSignal, startSec, strength);
+    resultBuffer = channelsToAudioBuffer(channels, sr);
+
+    // Prepare WAV download
+    const interleaved = interleaveChannels(channels);
+    const wavBlob = writeWavFile(interleaved, sr, channels.length);
+    const url = URL.createObjectURL(wavBlob);
+    dl.href = url;
+    dl.style.display = 'inline-block';
+
+    playOutBtn.disabled = false;
+    setProgress(1);
+    setTimeout(()=>setProgress(0), 400);
+  }
+
+  // Wire up UI
+  renderMaskBtn.addEventListener('click', drawMask);
+  embedBtn.addEventListener('click', doEmbed);
+
+  playOrigBtn.addEventListener('click', () => { if (decoded) playBuffer(decoded); });
+  playOutBtn.addEventListener('click', () => { if (resultBuffer) playBuffer(resultBuffer); });
+  stopBtn.addEventListener('click', stopPlayback);
+
+  fileEl.addEventListener('change', async e => {
+    stopPlayback();
+    resultBuffer = null; dl.style.display = 'none';
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      decoded = await decodeSelectedFile(file);
+      const dur = decoded.duration.toFixed(2);
+      info.textContent = `${decoded.numberOfChannels} ch @ ${decoded.sampleRate} Hz • ${dur} s`;
+      playOrigBtn.disabled = false;
+      embedBtn.disabled = false;
+      drawMask();
+    } catch (err) {
+      info.textContent = 'Failed to decode';
+      console.error(err);
+      alert('Could not decode that file. Try a different format (WAV/MP3/OGG).');
+    }
+  });
+
+  // Make the mask usable even before loading audio (fallback: 3s width)
+  (function initEmptyMask() {
+    const bins = parseInt(maskHEl.value || '224', 10);
+    maskCanvas.height = bins;
+    maskCanvas.width = 540;
+    mctx.fillStyle = '#000'; mctx.fillRect(0,0,maskCanvas.width,maskCanvas.height);
+    mctx.fillStyle = '#fff'; mctx.font = `bold ${Math.floor(bins*0.8)}px Arial`;
+    mctx.textAlign = 'center'; mctx.textBaseline = 'middle';
+    mctx.fillText(textEl.value || '', maskCanvas.width/2, bins/2);
+  })();
+})();
+</script>
+</body>
+</html>

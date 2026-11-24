@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8" />
+<title>Progressive Static Spectrogram (base64)</title>
+<style>
+  :root { --maxw: 680px; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; margin: 16px; }
+  .wrap { max-width: var(--maxw); margin: 0 auto; }
+  textarea { width: 100%; min-height: 140px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+  button { padding: 8px 12px; }
+  .row { display:flex; gap:10px; align-items:center; margin:10px 0; }
+  canvas { width: 100%; height: auto; border: 1px solid #ccc; display: block; image-rendering: pixelated; background:#000; }
+  small { color:#666; }
+  .muted { opacity:.7 }
+</style>
+
+<div class="wrap">
+  <h1 style="font-size:1.1rem;margin:0 0 8px;">Progressive Spectrogram</h1>
+  <p style="margin:0 0 8px;">
+    Paste base64 audio below (either a full <code>data:audio/...;base64,</code> URL or just raw base64), then click <b>Render</b>.
+    No playback. The spectrogram prints left → right, one column at a time.
+  </p>
+  <textarea id="b64" placeholder="e.g. data:audio/wav;base64,UklGRi4AAABXQVZFZm10..."></textarea>
+  <div class="row">
+    <button id="render">Render</button>
+    <small class="muted" id="status">Idle</small>
+  </div>
+  <canvas id="spec"></canvas>
+</div>
+
+<script>
+/*** Tunables (constants) ***/
+const MAX_CANVAS_WIDTH = 1200;      // Max intrinsic columns; longer audio is decimated to fit
+const TARGET_SR        = 16000;     // Resample target (Hz) for speed & consistency
+const FFT_SIZE         = 1024;      // Power-of-two (512..4096)
+const HOP_SIZE         = FFT_SIZE >> 2; // 75% overlap
+const DB_FLOOR         = -80;       // Dynamic range floor (dB)
+const COLUMNS_PER_FRAME= 1;         // Draw 1 pixel column per animation frame
+
+/*** Elements ***/
+const ta = document.getElementById('b64');
+const btn = document.getElementById('render');
+const canvas = document.getElementById('spec');
+const ctx = canvas.getContext('2d', { willReadFrequently: true });
+const statusEl = document.getElementById('status');
+
+/*** Color palette LUT (0..255): black → purple → magenta → red → orange → yellow → white ***/
+const COLOR_LUT = (() => {
+  const stops = [
+    [0.00, [0,   0,   0  ]],
+    [0.16, [64,  0, 128 ]],
+    [0.33, [255, 0, 255 ]],
+    [0.50, [255, 0, 0   ]],
+    [0.66, [255,128,0   ]],
+    [0.83, [255,255,0   ]],
+    [1.00, [255,255,255 ]]
+  ];
+  const lut = new Array(256);
+  for (let i = 0; i < 256; i++) {
+    const t = i / 255; let a = stops[0], b = stops[stops.length-1];
+    for (let s=0; s<stops.length-1; s++) { if (t>=stops[s][0] && t<=stops[s+1][0]) { a=stops[s]; b=stops[s+1]; break; } }
+    const u = (t - a[0]) / Math.max(1e-9, (b[0]-a[0]));
+    const rgb = [
+      Math.round(a[1][0] + (b[1][0]-a[1][0]) * u),
+      Math.round(a[1][1] + (b[1][1]-a[1][1]) * u),
+      Math.round(a[1][2] + (b[1][2]-a[1][2]) * u),
+    ];
+    lut[i] = rgb;
+  }
+  return lut;
+})();
+
+/*** Window & FFT ***/
+const HANN = new Float32Array(FFT_SIZE).map((_,i)=>0.5*(1 - Math.cos(2*Math.PI*i/(FFT_SIZE-1))));
+function fftRadix2(re, im) {
+  const n = re.length;
+  for (let i=0,j=0;i<n;i++){
+    if(i<j){[re[i],re[j]]=[re[j],re[i]];[im[i],im[j]]=[im[j],im[i]];}
+    let m=n>>1; while(m>=1 && j>=m){j-=m; m>>=1;} j+=m;
+  }
+  for (let size=2; size<=n; size<<=1) {
+    const half=size>>1, theta=-2*Math.PI/size;
+    const wpr=Math.cos(theta), wpi=Math.sin(theta);
+    for (let start=0; start<n; start+=size) {
+      let wr=1, wi=0;
+      for (let k=0; k<half; k++) {
+        const i0=start+k, i1=i0+half;
+        const tr=wr*re[i1]-wi*im[i1], ti=wr*im[i1]+wi*re[i1];
+        re[i1]=re[i0]-tr; im[i1]=im[i0]-ti;
+        re[i0]+=tr;      im[i0]+=ti;
+        const tmp=wr*wpr - wi*wpi; wi=wr*wpi + wi*wpr; wr=tmp;
+      }
+    }
+  }
+}
+
+/*** Helpers ***/
+function dataUrlFromMaybeBase64(s) {
+  const raw = (s||'').trim();
+  if (!raw) throw new Error('No input provided.');
+  return raw.startsWith('data:') ? raw : ('data:audio/wav;base64,' + raw);
+}
+function arrayBufferFromDataURL(dataURL) {
+  const comma = dataURL.indexOf(',');
+  if (comma === -1) throw new Error('Invalid data URL.');
+  const b64 = dataURL.slice(comma + 1);
+  const bin = atob(b64);
+  const len = bin.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes.buffer;
+}
+async function decodeAudio(ab) {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const ctx = new AC();
+  try {
+    const buf = await ctx.decodeAudioData(ab.slice(0));
+    try { ctx.close(); } catch(_) {}
+    return buf;
+  } catch (e) { try { ctx.close(); } catch(_) {} throw e; }
+}
+function downmixToMonoChannels(buffer) {
+  const channels = [...Array(buffer.numberOfChannels)].map((_,c)=>buffer.getChannelData(c));
+  if (channels.length === 1) return channels[0];
+  const len = channels[0].length;
+  const mono = new Float32Array(len);
+  for (let i=0;i<len;i++){ let s=0; for(let c=0;c<channels.length;c++) s+=channels[c][i]; mono[i]=s/channels.length; }
+  return mono;
+}
+function resampleLinear(signal, inRate, outRate) {
+  if (Math.abs(outRate - inRate) < 1) return signal;
+  const ratio = inRate / outRate;
+  const outLen = Math.max(1, Math.floor(signal.length / ratio));
+  const out = new Float32Array(outLen);
+  for (let i=0;i<outLen;i++){
+    const x = i * ratio, x0 = Math.floor(x), x1 = Math.min(signal.length - 1, x0 + 1);
+    const t = x - x0; out[i] = signal[x0]*(1-t) + signal[x1]*t;
+  }
+  return out;
+}
+
+/*** STFT → dB (linear freq) ***/
+function stftDb(signal) {
+  const n = FFT_SIZE, hop = HOP_SIZE;
+  const frames = Math.max(1, Math.floor((signal.length - n) / hop) + 1);
+  const bins = (n>>1) + 1;
+  const mags = new Float32Array(bins * frames);
+  const re = new Float32Array(n); const im = new Float32Array(n);
+
+  for (let f=0, pos=0; f<frames; f++, pos+=hop) {
+    for (let i=0;i<n;i++){ const s=signal[pos+i]||0; re[i]=s*HANN[i]; im[i]=0; }
+    fftRadix2(re, im);
+    for (let k=0;k<bins;k++){
+      const mr=re[k], mi=im[k];
+      mags[k + f*bins] = Math.hypot(mr, mi) / (n/2);
+    }
+  }
+
+  // dB normalize with floor
+  const db = new Float32Array(mags.length);
+  let maxDb = -Infinity;
+  for (let i=0;i<mags.length;i++){
+    const v = mags[i] > 1e-12 ? 20*Math.log10(mags[i]) : DB_FLOOR - 60;
+    db[i] = v; if (v>maxDb) maxDb = v;
+  }
+  const floor = Math.max(DB_FLOOR, maxDb + DB_FLOOR);
+  const range = Math.max(1e-6, maxDb - floor);
+  for (let i=0;i<db.length;i++) db[i] = Math.min(1, Math.max(0, (db[i]-floor)/range));
+  return { db, bins, frames };
+}
+
+/*** Progressive renderer state ***/
+let renderToken = 0;
+btn.addEventListener('click', async () => {
+  const myToken = ++renderToken; // cancel previous renders
+  statusEl.textContent = 'Decoding...';
+  try {
+    const dataURL = dataUrlFromMaybeBase64(ta.value);
+    const ab = arrayBufferFromDataURL(dataURL);
+    const buf = await decodeAudio(ab);
+    if (myToken !== renderToken) return;
+
+    statusEl.textContent = 'Preparing...';
+    const mono = downmixToMonoChannels(buf);
+    const sig = resampleLinear(mono, buf.sampleRate, TARGET_SR);
+    const { db, bins, frames } = stftDb(sig);
+    if (myToken !== renderToken) return;
+
+    // Decide output width (columns) via decimation
+    const decimate = Math.ceil(Math.max(1, frames / MAX_CANVAS_WIDTH));
+    const outW = Math.ceil(frames / decimate);
+    const outH = bins;
+
+    // Offscreen bitmap where we paint raw pixels (1:1 columns)
+    const off = document.createElement('canvas');
+    off.width = outW; off.height = outH;
+    const offCtx = off.getContext('2d', { willReadFrequently: true });
+    const columnImage = offCtx.createImageData(1, outH);
+
+    // Visible canvas is DPR-scaled, CSS keeps width:100%, height:auto (auto vertical scale)
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    canvas.width  = outW * dpr;
+    canvas.height = outH * dpr;
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+
+    // Progressive left->right draw loop
+    let x = 0;
+    function drawStep() {
+      if (myToken !== renderToken) return; // cancelled
+      const toDraw = Math.min(COLUMNS_PER_FRAME, outW - x);
+      for (let t=0; t<toDraw; t++, x++) {
+        // Average 'decimate' source STFT columns into one output column
+        const x0 = x * decimate, x1 = Math.min(frames, x0 + decimate);
+        for (let y=0; y<outH; y++) {
+          let acc = 0, count = 0;
+          for (let s=x0; s<x1; s++){ acc += db[y + s*outH]; count++; }
+          const v01 = count ? acc / count : 0;
+          const yy = (outH - 1) - y;               // flip vertically (top = high freq)
+          const idx = yy * 4;
+          const [r,g,b] = COLOR_LUT[(v01*255)|0];
+          columnImage.data[idx+0]=r;
+          columnImage.data[idx+1]=g;
+          columnImage.data[idx+2]=b;
+          columnImage.data[idx+3]=255;
+        }
+        offCtx.putImageData(columnImage, x, 0);
+      }
+      // Blit offscreen → visible (scaled for DPR)
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      ctx.drawImage(off, 0, 0);
+
+      statusEl.textContent = `Rendering ${Math.round((x/outW)*100)}%`;
+      if (x < outW) requestAnimationFrame(drawStep);
+      else statusEl.textContent = `Done (${outW}×${outH})`;
+    }
+    requestAnimationFrame(drawStep);
+
+  } catch (e) {
+    if (myToken !== renderToken) return;
+    console.error(e);
+    statusEl.textContent = 'Error';
+    alert('Failed to render: ' + (e && e.message ? e.message : e));
+  }
+});
+</script>
+</html>

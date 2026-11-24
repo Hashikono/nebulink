@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Low-Pass Audio Cutter (Web Audio API)</title>
+  <style>
+    :root {
+      --fg: #1f2937;
+      --bg: #f9fafb;
+      --muted: #6b7280;
+      --accent: #2563eb;
+      --card: #ffffff;
+      --border: #e5e7eb;
+      --radius: 12px;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; }
+    header { padding: 28px 20px 10px; text-align: center; }
+    h1 { margin: 0 0 6px; font-size: 24px; }
+    p.sub { margin: 0 auto; color: var(--muted); max-width: 70ch; }
+    main { max-width: 900px; margin: 18px auto 48px; padding: 0 16px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; box-shadow: 0 1px 0 rgba(0,0,0,.02); }
+    .row { display: grid; grid-template-columns: 1fr; gap: 12px; }
+    @media (min-width: 720px) { .row { grid-template-columns: 1fr 1fr; } }
+    label { font-weight: 600; display: block; margin-bottom: 6px; }
+    input[type="file"] { width: 100%; padding: 10px; border: 1px dashed var(--border); border-radius: 10px; background: #fff; }
+    .controls { display: grid; gap: 12px; }
+    .control { padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
+    .inline { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    input[type="range"] { width: 100%; }
+    output { font-variant-numeric: tabular-nums; min-width: 7ch; display: inline-block; text-align: right; }
+    button { cursor: pointer; border: 1px solid var(--border); background: #fff; padding: 10px 14px; border-radius: 10px; font-weight: 600; }
+    button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    details { margin-top: 8px; color: var(--muted); }
+    .hint { color: var(--muted); font-size: .92em; }
+    .spacer { height: 6px; }
+    footer { text-align: center; color: var(--muted); padding: 20px; }
+    .badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #eef2ff; color: #3730a3; margin-left: 8px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Low-Pass Audio Cutter <span class="badge">BiquadFilter</span></h1>
+    <p class="sub">Load an audio file, choose a cutoff, and remove everything above that frequency. Preview in real-time and optionally render a processed WAV for download.</p>
+  </header>
+
+  <main>
+    <section class="card">
+      <div class="row">
+        <div>
+          <label for="file">1) Choose an audio file</label>
+          <input id="file" type="file" accept="audio/*" />
+          <p class="hint">Works entirely in your browser. Your audio never leaves your device.</p>
+        </div>
+        <div>
+          <label for="player">2) Player</label>
+          <audio id="player" controls preload="metadata" style="width:100%" disabled></audio>
+          <div class="hint">Use the play/pause and scrub bar as usual.</div>
+        </div>
+      </div>
+
+      <div class="spacer"></div>
+
+      <div class="controls">
+        <div class="control">
+          <label for="cutoff">Cutoff frequency (Hz)</label>
+          <div class="inline">
+            <input id="cutoff" type="range" min="100" max="20000" step="1" value="5000" list="freqmarks">
+            <output id="cutoffOut" for="cutoff">5000 Hz</output>
+          </div>
+          <datalist id="freqmarks">
+            <option value="100" label="100"></option>
+            <option value="250" label="250"></option>
+            <option value="500" label="500"></option>
+            <option value="1000" label="1k"></option>
+            <option value="2000" label="2k"></option>
+            <option value="5000" label="5k"></option>
+            <option value="10000" label="10k"></option>
+            <option value="15000" label="15k"></option>
+            <option value="20000" label="20k"></option>
+          </datalist>
+          <div class="hint">Lower values remove more “top end.”</div>
+        </div>
+
+        <div class="control">
+          <label for="q">Resonance (Q)</label>
+          <div class="inline">
+            <input id="q" type="range" min="0.0001" max="20" step="0.0001" value="0.707">
+            <output id="qOut" for="q">0.707</output>
+          </div>
+          <div class="hint">Q≈0.707 (Butterworth) is flat. Higher Q adds a resonant peak at the cutoff.</div>
+        </div>
+
+        <div class="control inline">
+          <label class="inline" for="bypass" style="margin:0">Bypass</label>
+          <input id="bypass" type="checkbox" />
+          <span class="hint">Compare filtered vs original.</span>
+        </div>
+
+        <div class="actions">
+          <button id="preview" class="primary" disabled>Preview with Filter</button>
+          <button id="stop" disabled>Stop</button>
+          <button id="render" disabled>Render &amp; Download WAV</button>
+        </div>
+      </div>
+
+      <details>
+        <summary>How it works</summary>
+        <p>This page uses the Web Audio API. For preview, your audio element is routed through a <code>BiquadFilterNode</code> set to <em>lowpass</em>. For export, the file is processed in an <code>OfflineAudioContext</code> and saved as a 16-bit PCM WAV.</p>
+      </details>
+    </section>
+  </main>
+
+  <footer>© 2025 • Runs locally in your browser</footer>
+
+<script>
+(() => {
+  const $ = (sel) => document.querySelector(sel);
+  const fileInput = $('#file');
+  const player = $('#player');
+  const cutoff = $('#cutoff');
+  const cutoffOut = $('#cutoffOut');
+  const q = $('#q');
+  const qOut = $('#qOut');
+  const bypass = $('#bypass');
+  const btnPreview = $('#preview');
+  const btnStop = $('#stop');
+  const btnRender = $('#render');
+
+  let audioCtx = null;
+  let sourceNode = null;
+  let filterNode = null;
+  let connectedViaFilter = false;
+  let objectUrl = null;
+
+  function fmtHz(v) {
+    const n = Number(v);
+    if (n >= 1000) return (n/1000).toFixed(n % 1000 === 0 ? 0 : 2).replace(/\.?0+$/,'') + ' kHz';
+    return n.toFixed(0) + ' Hz';
+  }
+
+  cutoff.addEventListener('input', () => {
+    cutoffOut.textContent = fmtHz(cutoff.value);
+    if (filterNode) {
+      try {
+        filterNode.frequency.cancelScheduledValues(0);
+        filterNode.frequency.setTargetAtTime(Number(cutoff.value), audioCtx.currentTime, 0.01);
+      } catch {}
+    }
+  });
+  cutoffOut.textContent = fmtHz(cutoff.value);
+
+  q.addEventListener('input', () => {
+    const val = Number(q.value);
+    qOut.textContent = val.toFixed(3).replace(/\.?0+$/,'') ;
+    if (filterNode) {
+      try {
+        filterNode.Q.cancelScheduledValues(0);
+        filterNode.Q.setTargetAtTime(val, audioCtx.currentTime, 0.01);
+      } catch {}
+    }
+  });
+  qOut.textContent = Number(q.value).toFixed(3).replace(/\.?0+$/,'');
+
+  // Load file
+  fileInput.addEventListener('change', async () => {
+    if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
+    const file = fileInput.files && fileInput.files[0];
+    if (!file) return;
+
+    objectUrl = URL.createObjectURL(file);
+    player.src = objectUrl;
+    player.disabled = false;
+    btnPreview.disabled = false;
+    btnRender.disabled = false;
+    btnStop.disabled = false;
+  });
+
+  // Prepare WebAudio graph
+  async function ensureGraph() {
+    if (!audioCtx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AC();
+    }
+    if (!sourceNode) {
+      sourceNode = audioCtx.createMediaElementSource(player);
+    }
+    if (!filterNode) {
+      filterNode = audioCtx.createBiquadFilter();
+      filterNode.type = 'lowpass';
+      filterNode.frequency.value = Number(cutoff.value);
+      filterNode.Q.value = Number(q.value);
+    }
+  }
+
+  function connectFiltered() {
+    if (!audioCtx || !sourceNode || !filterNode) return;
+    try { sourceNode.disconnect(); } catch {}
+    try { filterNode.disconnect(); } catch {}
+    sourceNode.connect(filterNode);
+    filterNode.connect(audioCtx.destination);
+    connectedViaFilter = true;
+    player.muted = true;
+  }
+
+  function connectBypassed() {
+    if (!audioCtx || !sourceNode) return;
+    try { sourceNode.disconnect(); } catch {}
+    try { filterNode && filterNode.disconnect(); } catch {}
+    sourceNode.connect(audioCtx.destination);
+    connectedViaFilter = false;
+    player.muted = true;
+  }
+
+  btnPreview.addEventListener('click', async () => {
+    await ensureGraph();
+    if (bypass.checked) connectBypassed(); else connectFiltered();
+    try { await audioCtx.resume(); } catch {}
+    player.play();
+  });
+
+  btnStop.addEventListener('click', async () => {
+    player.pause();
+    if (audioCtx && audioCtx.state !== 'closed') {
+      try { await audioCtx.suspend(); } catch {}
+    }
+  });
+
+  bypass.addEventListener('change', () => {
+    if (!audioCtx) return;
+    if (bypass.checked) connectBypassed(); else connectFiltered();
+  });
+
+  // Render & download
+  btnRender.addEventListener('click', async () => {
+    const file = fileInput.files && fileInput.files[0];
+    if (!file) return alert('Choose an audio file first.');
+
+    btnRender.disabled = true;
+    btnRender.textContent = 'Rendering…';
+
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      const tempCtx = audioCtx || new AC();
+      const arrayBuf = await file.arrayBuffer();
+      const decoded = await tempCtx.decodeAudioData(arrayBuf);
+
+      const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+      const offlineCtx = new OAC(decoded.numberOfChannels, decoded.length, decoded.sampleRate);
+
+      const src = offlineCtx.createBufferSource();
+      src.buffer = decoded;
+
+      const lp = offlineCtx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = Number(cutoff.value);
+      lp.Q.value = Number(q.value);
+
+      src.connect(lp).connect(offlineCtx.destination);
+      src.start(0);
+
+      const rendered = await offlineCtx.startRendering();
+
+      const wavBlob = audioBufferToWav(rendered);
+      const url = URL.createObjectURL(wavBlob);
+      const a = document.createElement('a');
+      const baseName = (file.name || 'output').replace(/\.[^.]+$/, '');
+      a.href = url;
+      a.download = baseName + `_lowpass_${Math.round(Number(cutoff.value))}Hz.wav`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    } catch (err) {
+      console.error(err);
+      alert('Sorry, rendering failed: ' + (err && err.message ? err.message : err));
+    } finally {
+      btnRender.textContent = 'Render & Download WAV';
+      btnRender.disabled = false;
+    }
+  });
+
+  function audioBufferToWav(buffer) {
+    const numCh = buffer.numberOfChannels;
+    const sampleRate = buffer.sampleRate;
+    const length = buffer.length;
+    const channels = [];
+    for (let ch = 0; ch < numCh; ch++) channels.push(buffer.getChannelData(ch));
+    const interleaved = new Float32Array(length * numCh);
+    for (let i = 0; i < length; i++) {
+      for (let ch = 0; ch < numCh; ch++) {
+        interleaved[i * numCh + ch] = channels[ch][i];
+      }
+    }
+    const bytesPerSample = 2;
+    const blockAlign = numCh * bytesPerSample;
+    const bufferSize = 44 + interleaved.length * bytesPerSample;
+    const ab = new ArrayBuffer(bufferSize);
+    const view = new DataView(ab);
+
+    function writeString(offset, str) { for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i)); }
+
+    let offset = 0;
+    writeString(offset, 'RIFF'); offset += 4;
+    view.setUint32(offset, 36 + interleaved.length * bytesPerSample, true); offset += 4;
+    writeString(offset, 'WAVE'); offset += 4;
+    writeString(offset, 'fmt '); offset += 4;
+    view.setUint32(offset, 16, true); offset += 4;
+    view.setUint16(offset, 1, true); offset += 2;
+    view.setUint16(offset, numCh, true); offset += 2;
+    view.setUint32(offset, sampleRate, true); offset += 4;
+    view.setUint32(offset, sampleRate * blockAlign, true); offset += 4;
+    view.setUint16(offset, blockAlign, true); offset += 2;
+    view.setUint16(offset, 16, true); offset += 2;
+    writeString(offset, 'data'); offset += 4;
+    view.setUint32(offset, interleaved.length * bytesPerSample, true); offset += 4;
+
+    for (let i = 0; i < interleaved.length; i++, offset += 2) {
+      let s = Math.max(-1, Math.min(1, interleaved[i]));
+      s = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      view.setInt16(offset, s, true);
+    }
+
+    return new Blob([view], { type: 'audio/wav' });
+  }
+
+  player.addEventListener('play', () => { btnPreview.textContent = 'Previewing…'; });
+  player.addEventListener('pause', () => { btnPreview.textContent = 'Preview with Filter'; });
+})();
+</script>
+</body>
+</html>

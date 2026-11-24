@@ -1,0 +1,1170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File System Editor - New Format</title>
+    <style>
+        :root {
+            --primary: #2c3e50;
+            --secondary: #3498db;
+            --accent: #e74c3c;
+            --light: #ecf0f1;
+            --dark: #34495e;
+            --success: #2ecc71;
+            --warning: #f39c12;
+        }
+        
+        body {
+            font-family: 'Courier New', monospace;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        
+        h1, h2, h3 {
+            color: var(--primary);
+        }
+        
+        textarea {
+            width: 100%;
+            min-height: 200px;
+            font-family: 'Courier New', monospace;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            resize: vertical;
+        }
+        
+        button {
+            background-color: var(--secondary);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px 0;
+            transition: background-color 0.2s;
+        }
+        
+        button:hover {
+            background-color: #2980b9;
+        }
+        
+        button.delete {
+            background-color: var(--accent);
+        }
+        
+        button.delete:hover {
+            background-color: #c0392b;
+        }
+        
+        button.submit {
+            background-color: var(--success);
+        }
+        
+        button.submit:hover {
+            background-color: #27ae60;
+        }
+        
+        .section {
+            margin-bottom: 30px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        
+        .file-system-tree {
+            background-color: var(--light);
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .tree-item {
+            margin-left: 20px;
+            padding: 5px;
+            border-left: 1px dotted #ccc;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        .tree-item:hover {
+            background-color: rgba(52, 152, 219, 0.1);
+        }
+        
+        .tree-item.selected {
+            background-color: rgba(52, 152, 219, 0.2);
+            border-left: 2px solid var(--secondary);
+        }
+        
+        .file {
+            color: var(--secondary);
+        }
+        
+        .dir {
+            color: var(--primary);
+            font-weight: bold;
+        }
+        
+        .hidden {
+            color: #7f8c8d;
+            font-style: italic;
+        }
+        
+        .editor {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        
+        input, select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        
+        .checkbox-group {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        
+        .checkbox-group input {
+            width: auto;
+        }
+        
+        .output {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            border-left: 4px solid var(--secondary);
+            font-family: 'Courier New', monospace;
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .tabs {
+            display: flex;
+            margin-bottom: 10px;
+        }
+        
+        .tab {
+            padding: 8px 16px;
+            background-color: #eee;
+            border: 1px solid #ddd;
+            cursor: pointer;
+        }
+        
+        .tab.active {
+            background-color: white;
+            border-bottom: none;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        .actions {
+            display: flex;
+            gap: 10px;
+            margin: 10px 0;
+        }
+        
+        .status-bar {
+            padding: 10px;
+            background-color: var(--light);
+            border-radius: 4px;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+        
+        .edit-mode {
+            background-color: rgba(243, 156, 18, 0.1);
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            border-left: 4px solid var(--warning);
+        }
+        
+        .asset-name-input {
+            display: none;
+            margin-top: 10px;
+        }
+        
+        .asset-hint {
+            font-size: 12px;
+            color: #666;
+            margin-top: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>File System Editor - New Format</h1>
+        <p>This tool helps you create and edit the file system entries for your virtual Linux environment.</p>
+        
+        <div class="section">
+            <h2>Current File System Definition</h2>
+            <textarea id="inputFS"></textarea>
+            <button id="parseBtn">Parse File System</button>
+        </div>
+        
+        <div class="section">
+            <h2>File System Tree</h2>
+            <div id="fileSystemTree" class="file-system-tree">
+                <!-- File system tree will be rendered here -->
+            </div>
+            
+            <div class="actions">
+                <button id="deleteBtn" class="delete" disabled>Delete Selected</button>
+            </div>
+            
+            <div id="editModeIndicator" class="edit-mode" style="display: none;">
+                <strong>Edit Mode:</strong> You are currently editing an existing item.
+            </div>
+            
+            <div class="tabs">
+                <div class="tab active" data-tab="file">Add File</div>
+                <div class="tab" data-tab="dir">Add Directory</div>
+            </div>
+            
+            <div class="editor">
+                <div>
+                    <div id="fileTab" class="tab-content active">
+                        <h3>File Properties</h3>
+                        <div class="form-group">
+                            <label for="fileDir">Directory:</label>
+                            <input type="text" id="fileDir" placeholder="/path/to/directory">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="fileName">Name:</label>
+                            <input type="text" id="fileName" placeholder="filename.txt">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="fileKind">Kind:</label>
+                            <select id="fileKind">
+                                <option value="text">Text</option>
+                                <option value="image">Image</option>
+                                <option value="audio">Audio</option>
+                                <option value="file">File (Generic)</option>
+                            </select>
+                        </div>
+                        
+                        <div id="contentField" class="form-group">
+                            <label for="fileContent">Content:</label>
+                            <textarea id="fileContent" placeholder="File content..."></textarea>
+                        </div>
+                        
+                        <div id="assetNameInput" class="form-group asset-name-input">
+                            <label for="assetName">Asset Name:</label>
+                            <input type="text" id="assetName" placeholder="Enter asset name (e.g., obs1)">
+                            <div class="asset-hint">Will be converted to ASSETS.your_input</div>
+                        </div>
+                        
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="fileHidden">
+                            <label for="fileHidden">Hidden</label>
+                        </div>
+                        
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="fileLocked">
+                            <label for="fileLocked">Locked</label>
+                        </div>
+                        
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="fileCorrupted">
+                            <label for="fileCorrupted">Corrupted</label>
+                        </div>
+                        
+                        <button id="addFileBtn">Add File</button>
+                        <button id="submitFileBtn" class="submit" style="display: none;">Submit Changes</button>
+                        <button id="cancelEditBtn" style="display: none;">Cancel</button>
+                    </div>
+                    
+                    <div id="dirTab" class="tab-content">
+                        <h3>Directory Properties</h3>
+                        <div class="form-group">
+                            <label for="dirPath">Path:</label>
+                            <input type="text" id="dirPath" placeholder="/path/to/directory">
+                        </div>
+                        
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="dirHidden">
+                            <label for="dirHidden">Hidden</label>
+                        </div>
+                        
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="dirLocked">
+                            <label for="dirLocked">Locked</label>
+                        </div>
+                        
+                        <button id="addDirBtn">Add Directory</button>
+                        <button id="submitDirBtn" class="submit" style="display: none;">Submit Changes</button>
+                        <button id="cancelEditDirBtn" style="display: none;">Cancel</button>
+                    </div>
+                </div>
+                
+                <div>
+                    <h3>Real-time Output</h3>
+                    <div class="output" id="outputCode">
+                        // Your file system code will appear here
+                    </div>
+                    
+                    <div class="status-bar" id="statusBar">
+                        Ready. Add new items to get started.
+                    </div>
+                    
+                    <div class="actions">
+                        <button id="copyBtn">Copy to Clipboard</button>
+                        <button id="downloadBtn">Download as JavaScript</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Store file system entries
+        let entries = [];
+        let selectedItem = null;
+        let editMode = false;
+        
+        // DOM elements
+        const inputFS = document.getElementById('inputFS');
+        const parseBtn = document.getElementById('parseBtn');
+        const fileSystemTree = document.getElementById('fileSystemTree');
+        const tabs = document.querySelectorAll('.tab');
+        const tabContents = document.querySelectorAll('.tab-content');
+        const outputCode = document.getElementById('outputCode');
+        const copyBtn = document.getElementById('copyBtn');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const deleteBtn = document.getElementById('deleteBtn');
+        const statusBar = document.getElementById('statusBar');
+        const editModeIndicator = document.getElementById('editModeIndicator');
+        const contentField = document.getElementById('contentField');
+        const assetNameInput = document.getElementById('assetNameInput');
+        const fileKind = document.getElementById('fileKind');
+        
+        // File form elements
+        const fileDir = document.getElementById('fileDir');
+        const fileName = document.getElementById('fileName');
+        const fileContent = document.getElementById('fileContent');
+        const fileHidden = document.getElementById('fileHidden');
+        const fileLocked = document.getElementById('fileLocked');
+        const fileCorrupted = document.getElementById('fileCorrupted');
+        const assetName = document.getElementById('assetName');
+        const addFileBtn = document.getElementById('addFileBtn');
+        const submitFileBtn = document.getElementById('submitFileBtn');
+        const cancelEditBtn = document.getElementById('cancelEditBtn');
+        
+        // Directory form elements
+        const dirPath = document.getElementById('dirPath');
+        const dirHidden = document.getElementById('dirHidden');
+        const dirLocked = document.getElementById('dirLocked');
+        const addDirBtn = document.getElementById('addDirBtn');
+        const submitDirBtn = document.getElementById('submitDirBtn');
+        const cancelEditDirBtn = document.getElementById('cancelEditDirBtn');
+        
+        // Show/hide asset input based on file kind
+        fileKind.addEventListener('change', () => {
+            if (fileKind.value === 'image' || fileKind.value === 'audio') {
+                contentField.style.display = 'none';
+                assetNameInput.style.display = 'block';
+            } else {
+                contentField.style.display = 'block';
+                assetNameInput.style.display = 'none';
+            }
+        });
+        
+        // Tab functionality
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                const tabName = tab.getAttribute('data-tab');
+                
+                // Update active tab
+                tabs.forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                
+                // Show corresponding content
+                tabContents.forEach(content => content.classList.remove('active'));
+                document.getElementById(`${tabName}Tab`).classList.add('active');
+                
+                // If in edit mode, cancel it when switching tabs
+                if (editMode) {
+                    cancelEdit();
+                }
+            });
+        });
+        
+        // Parse existing file system
+        parseBtn.addEventListener('click', () => {
+            try {
+                const text = inputFS.value;
+                
+                if (!text.trim()) {
+                    updateStatus('Please enter file system definition', 'error');
+                    return;
+                }
+                
+                // Extract entries from the text
+                const lines = text.split('\n');
+                let inEntries = false;
+                
+                entries = [];
+                
+                for (const line of lines) {
+                    const trimmed = line.trim();
+                    
+                    if (trimmed.includes('const ENTRIES = [') || trimmed.includes('ENTRIES = [')) {
+                        inEntries = true;
+                        continue;
+                    }
+                    
+                    if (inEntries && trimmed.includes('];')) {
+                        break;
+                    }
+                    
+                    if (inEntries && trimmed) {
+                        // Skip comments
+                        if (trimmed.startsWith('//')) continue;
+                        
+                        // Handle entryDir and entryFile calls
+                        if (trimmed.includes('entryDir') || trimmed.includes('entryFile')) {
+                            // Remove any trailing commas
+                            const cleanLine = trimmed.replace(/,$/, '');
+                            entries.push(cleanLine);
+                        }
+                    }
+                }
+                
+                if (entries.length === 0) {
+                    updateStatus('No valid entries found', 'error');
+                    return;
+                }
+                
+                renderFileSystemTree();
+                generateOutput();
+                updateStatus(`Parsed ${entries.length} file system entries`);
+            } catch (error) {
+                alert('Error parsing file system: ' + error.message);
+                updateStatus('Error parsing file system', 'error');
+            }
+        });
+        
+        // Add a new file
+        addFileBtn.addEventListener('click', () => {
+            if (editMode) {
+                updateStatus('Finish or cancel current edit first', 'error');
+                return;
+            }
+            
+            const dir = fileDir.value.trim();
+            const name = fileName.value.trim();
+            
+            if (!dir || !name) {
+                updateStatus('Please enter both directory and name', 'error');
+                return;
+            }
+            
+            const fullPath = `${dir}/${name}`;
+            
+            // Check if path already exists
+            if (isPathExists(fullPath)) {
+                updateStatus('A file or directory with this path already exists', 'error');
+                return;
+            }
+            
+            addFileEntry(dir, name);
+        });
+        
+        // Submit file edits
+        submitFileBtn.addEventListener('click', () => {
+            if (!editMode || !selectedItem) {
+                updateStatus('Not in edit mode', 'error');
+                return;
+            }
+            
+            const dir = fileDir.value.trim();
+            const name = fileName.value.trim();
+            
+            if (!dir || !name) {
+                updateStatus('Please enter both directory and name', 'error');
+                return;
+            }
+            
+            const fullPath = `${dir}/${name}`;
+            
+            // If path changed, check if new path already exists
+            if (fullPath !== selectedItem.path && isPathExists(fullPath)) {
+                updateStatus('A file or directory with this path already exists', 'error');
+                return;
+            }
+            
+            // Update the entry
+            updateFileEntry(dir, name);
+        });
+        
+        // Cancel edit mode
+        cancelEditBtn.addEventListener('click', () => {
+            cancelEdit();
+        });
+        
+        cancelEditDirBtn.addEventListener('click', () => {
+            cancelEdit();
+        });
+        
+        // Add a new directory
+        addDirBtn.addEventListener('click', () => {
+            if (editMode) {
+                updateStatus('Finish or cancel current edit first', 'error');
+                return;
+            }
+            
+            const path = dirPath.value.trim();
+            if (!path) {
+                updateStatus('Please enter a directory path', 'error');
+                return;
+            }
+            
+            // Check if path already exists
+            if (isPathExists(path)) {
+                updateStatus('A file or directory with this path already exists', 'error');
+                return;
+            }
+            
+            addDirectoryEntry(path);
+        });
+        
+        // Submit directory edits
+        submitDirBtn.addEventListener('click', () => {
+            if (!editMode || !selectedItem) {
+                updateStatus('Not in edit mode', 'error');
+                return;
+            }
+            
+            const path = dirPath.value.trim();
+            if (!path) {
+                updateStatus('Please enter a directory path', 'error');
+                return;
+            }
+            
+            // If path changed, check if new path already exists
+            if (path !== selectedItem.path && isPathExists(path)) {
+                updateStatus('A file or directory with this path already exists', 'error');
+                return;
+            }
+            
+            // Update the entry
+            updateDirectoryEntry(path);
+        });
+        
+        // Delete selected item
+        deleteBtn.addEventListener('click', () => {
+            if (!selectedItem) {
+                updateStatus('No item selected for deletion', 'error');
+                return;
+            }
+            
+            if (true) {
+                // Find and remove the entry
+                const index = entries.findIndex(entry => {
+                    if (typeof entry === 'object') {
+                        return entry.path === selectedItem.path;
+                    }
+                    
+                    // For entryDir
+                    const dirMatch = entry.match(/entryDir\(\s*"([^"]+)"/) || entry.match(/entryDir\(\s*'([^']+)'/);
+                    if (dirMatch && dirMatch[1] === selectedItem.path) {
+                        return true;
+                    }
+                    
+                    // For entryFile
+                    const fileMatch = entry.match(/entryFile\(\s*{[\s\S]*?dir:\s*"([^"]+)"[\s\S]*?name:\s*"([^"]+)"/) || 
+                                       entry.match(/entryFile\(\s*{[\s\S]*?dir:\s*'([^']+)'[\s\S]*?name:\s*'([^']+)'/);
+                    if (fileMatch && `${fileMatch[1]}/${fileMatch[2]}` === selectedItem.path) {
+                        return true;
+                    }
+                    
+                    return false;
+                });
+                
+                if (index !== -1) {
+                    entries.splice(index, 1);
+                    renderFileSystemTree();
+                    generateOutput();
+                    selectedItem = null;
+                    deleteBtn.disabled = true;
+                    updateStatus(`Deleted "${selectedItem.path}"`);
+                }
+            }
+        });
+        
+        // Check if a path already exists
+        function isPathExists(path) {
+            return entries.some(entry => {
+                if (typeof entry === 'string') {
+                    // Check for directories
+                    const dirMatch = entry.match(/entryDir\(\s*"([^"]+)"/) || entry.match(/entryDir\(\s*'([^']+)'/);
+                    if (dirMatch && dirMatch[1] === path) {
+                        return true;
+                    }
+                    
+                    // Check for files
+                    const fileMatch = entry.match(/entryFile\(\s*{[\s\S]*?dir:\s*"([^"]+)"[\s\S]*?name:\s*"([^"]+)"/) || 
+                                       entry.match(/entryFile\(\s*{[\s\S]*?dir:\s*'([^']+)'[\s\S]*?name:\s*'([^']+)'/);
+                    if (fileMatch && `${fileMatch[1]}/${fileMatch[2]}` === path) {
+                        return true;
+                    }
+                }
+                return false;
+            });
+        }
+        
+        // Add a file entry
+        function addFileEntry(dir, name) {
+            // Create the file entry
+            let entry = `entryFile({ dir:"${dir}", name:"${name}", kind:"${fileKind.value}"`;
+            
+            // Handle content or asset
+            if (fileKind.value === 'image' || fileKind.value === 'audio') {
+                const assetValue = assetName.value.trim();
+                if (assetValue) {
+                    entry += `, content:ASSETS.${assetValue}`;
+                }
+            } else if (fileContent.value) {
+                // Handle multi-line content
+                if (fileContent.value.includes('\n')) {
+                    entry += `, content:\`${fileContent.value}\``;
+                } else {
+                    entry += `, content:"${fileContent.value}"`;
+                }
+            }
+            
+            if (fileHidden.checked) entry += ', hidden:true';
+            if (fileLocked.checked) entry += ', locked:true';
+            if (fileCorrupted.checked) entry += ', corrupted:true';
+            
+            entry += ' })';
+            
+            entries.push(entry);
+            renderFileSystemTree();
+            generateOutput();
+            
+            // Reset form
+            resetFileForm();
+            updateStatus(`Added file: ${dir}/${name}`);
+        }
+        
+        // Update a file entry
+        function updateFileEntry(dir, name) {
+            // Find the existing entry
+            const index = entries.findIndex(entry => {
+                if (typeof entry === 'string') {
+                    const fileMatch = entry.match(/entryFile\(\s*{[\s\S]*?dir:\s*"([^"]+)"[\s\S]*?name:\s*"([^"]+)"/) || 
+                                       entry.match(/entryFile\(\s*{[\s\S]*?dir:\s*'([^']+)'[\s\S]*?name:\s*'([^']+)'/);
+                    if (fileMatch && `${fileMatch[1]}/${fileMatch[2]}` === selectedItem.path) {
+                        return true;
+                    }
+                }
+                return false;
+            });
+            
+            if (index === -1) {
+                updateStatus('Could not find entry to update', 'error');
+                return;
+            }
+            
+            // Create the updated file entry
+            let entry = `entryFile({ dir:"${dir}", name:"${name}", kind:"${fileKind.value}"`;
+            
+            // Handle content or asset
+            if (fileKind.value === 'image' || fileKind.value === 'audio') {
+                const assetValue = assetName.value.trim();
+                if (assetValue) {
+                    entry += `, content:ASSETS.${assetValue}`;
+                }
+            } else if (fileContent.value) {
+                // Handle multi-line content
+                if (fileContent.value.includes('\n')) {
+                    entry += `, content:\`${fileContent.value}\``;
+                } else {
+                    entry += `, content:"${fileContent.value}"`;
+                }
+            }
+            
+            if (fileHidden.checked) entry += ', hidden:true';
+            if (fileLocked.checked) entry += ', locked:true';
+            if (fileCorrupted.checked) entry += ', corrupted:true';
+            
+            entry += ' })';
+            
+            // Replace the entry
+            entries[index] = entry;
+            renderFileSystemTree();
+            generateOutput();
+            
+            // Exit edit mode
+            cancelEdit();
+            updateStatus(`Updated file: ${dir}/${name}`);
+        }
+        
+        // Add a directory entry
+        function addDirectoryEntry(path) {
+            // Create the directory entry
+            let entry = `entryDir("${path}"`;
+            
+            if (dirHidden.checked || dirLocked.checked) {
+                entry += ', {';
+                if (dirHidden.checked) entry += 'hidden:true';
+                if (dirHidden.checked && dirLocked.checked) entry += ', ';
+                if (dirLocked.checked) entry += 'locked:true';
+                entry += '}';
+            }
+            
+            entry += ')';
+            
+            entries.push(entry);
+            renderFileSystemTree();
+            generateOutput();
+            
+            // Reset form
+            resetDirForm();
+            updateStatus(`Added directory: ${path}`);
+        }
+        
+        // Update a directory entry
+        function updateDirectoryEntry(path) {
+            // Find the existing entry
+            const index = entries.findIndex(entry => {
+                if (typeof entry === 'string') {
+                    const dirMatch = entry.match(/entryDir\(\s*"([^"]+)"/) || entry.match(/entryDir\(\s*'([^']+)'/);
+                    return dirMatch && dirMatch[1] === selectedItem.path;
+                }
+                return false;
+            });
+            
+            if (index === -1) {
+                updateStatus('Could not find entry to update', 'error');
+                return;
+            }
+            
+            // Create the updated directory entry
+            let entry = `entryDir("${path}"`;
+            
+            if (dirHidden.checked || dirLocked.checked) {
+                entry += ', {';
+                if (dirHidden.checked) entry += 'hidden:true';
+                if (dirHidden.checked && dirLocked.checked) entry += ', ';
+                if (dirLocked.checked) entry += 'locked:true';
+                entry += '}';
+            }
+            
+            entry += ')';
+            
+            // Replace the entry
+            entries[index] = entry;
+            renderFileSystemTree();
+            generateOutput();
+            
+            // Exit edit mode
+            cancelEdit();
+            updateStatus(`Updated directory: ${path}`);
+        }
+        
+        // Cancel edit mode
+        function cancelEdit() {
+            editMode = false;
+            selectedItem = null;
+            
+            // Reset UI
+            editModeIndicator.style.display = 'none';
+            addFileBtn.style.display = 'block';
+            submitFileBtn.style.display = 'none';
+            cancelEditBtn.style.display = 'none';
+            addDirBtn.style.display = 'block';
+            submitDirBtn.style.display = 'none';
+            cancelEditDirBtn.style.display = 'none';
+            deleteBtn.disabled = true;
+            
+            // Reset forms
+            resetFileForm();
+            resetDirForm();
+            
+            // Clear selection in tree
+            const selectedElements = document.querySelectorAll('.tree-item.selected');
+            selectedElements.forEach(el => el.classList.remove('selected'));
+            
+            updateStatus('Edit cancelled');
+        }
+        
+        // Reset file form
+        function resetFileForm() {
+            fileDir.value = '';
+            fileName.value = '';
+            fileKind.value = 'text';
+            fileContent.value = '';
+            fileHidden.checked = false;
+            fileLocked.checked = false;
+            fileCorrupted.checked = false;
+            assetName.value = '';
+            
+            // Reset UI
+            contentField.style.display = 'block';
+            assetNameInput.style.display = 'none';
+        }
+        
+        // Reset directory form
+        function resetDirForm() {
+            dirPath.value = '';
+            dirHidden.checked = false;
+            dirLocked.checked = false;
+        }
+        
+        // Update status bar
+        function updateStatus(message, type = 'info') {
+            statusBar.textContent = message;
+            statusBar.style.color = type === 'error' ? '#e74c3c' : '#2c3e50';
+        }
+        
+        // Render the file system tree
+        function renderFileSystemTree() {
+            fileSystemTree.innerHTML = '';
+            
+            if (entries.length === 0) {
+                fileSystemTree.innerHTML = '<p>No file system entries yet. Add some files or directories.</p>';
+                return;
+            }
+            
+            // Create a mapping of paths to their properties
+            const pathMap = {};
+            
+            entries.forEach(entry => {
+                if (typeof entry !== 'string') return;
+                
+                let path, isDir, isHidden, isLocked, isFile = false;
+                
+                if (entry.includes('entryDir')) {
+                    // Extract directory path and properties
+                    const pathMatch = entry.match(/entryDir\(\s*"([^"]+)"/) || entry.match(/entryDir\(\s*'([^']+)'/);
+                    if (pathMatch) {
+                        path = pathMatch[1];
+                        isDir = true;
+                        
+                        // Check if hidden
+                        isHidden = entry.includes('hidden:true');
+                        
+                        // Check if locked
+                        isLocked = entry.includes('locked:true');
+                    }
+                } else if (entry.includes('entryFile')) {
+                    // Extract file path and properties
+                    const dirMatch = entry.match(/dir:\s*"([^"]+)"/) || entry.match(/dir:\s*'([^']+)'/);
+                    const nameMatch = entry.match(/name:\s*"([^"]+)"/) || entry.match(/name:\s*'([^']+)'/);
+                    
+                    if (dirMatch && nameMatch) {
+                        path = `${dirMatch[1]}/${nameMatch[1]}`;
+                        isFile = true;
+                        
+                        // Check if hidden
+                        isHidden = entry.includes('hidden:true');
+                        
+                        // Check if locked
+                        isLocked = entry.includes('locked:true');
+                        
+                        // Check if corrupted
+                        const corruptedMatch = entry.match(/corrupted:\s*(true|false)/);
+                        if (corruptedMatch && corruptedMatch[1] === 'true') {
+                            // Mark as corrupted
+                            isLocked = true; // Visual indication
+                        }
+                    }
+                }
+                
+                if (path) {
+                    pathMap[path] = {
+                        isDir: isDir,
+                        isFile: isFile,
+                        isHidden: isHidden,
+                        isLocked: isLocked,
+                        entry: entry
+                    };
+                }
+            });
+            
+            // Create hierarchical structure
+            const tree = {};
+            
+            Object.keys(pathMap).sort().forEach(path => {
+                const parts = path.split('/').filter(part => part !== '');
+                let currentLevel = tree;
+                
+                parts.forEach((part, index) => {
+                    if (!currentLevel[part]) {
+                        currentLevel[part] = {};
+                    }
+                    
+                    if (index === parts.length - 1) {
+                        currentLevel[part].properties = pathMap[path];
+                    }
+                    
+                    currentLevel = currentLevel[part];
+                });
+            });
+            
+            // Render the tree
+            function renderTree(node, level = 0, path = '') {
+                const keys = Object.keys(node).sort();
+                
+                keys.forEach(key => {
+                    if (key === 'properties') return;
+                    
+                    const fullPath = path ? `${path}/${key}` : `/${key}`;
+                    const item = node[key];
+                    const properties = item.properties || {};
+                    const isDir = properties.isDir;
+                    const isFile = properties.isFile;
+                    const isHidden = properties.isHidden;
+                    const isLocked = properties.isLocked;
+                    
+                    const div = document.createElement('div');
+                    div.className = 'tree-item';
+                    div.style.marginLeft = `${level * 20}px`;
+                    div.setAttribute('data-path', fullPath);
+                    
+                    let className = isDir ? 'dir' : 'file';
+                    if (isHidden) className += ' hidden';
+                    
+                    let text = isDir ? '📁 ' : '📄 ';
+                    text += key;
+                    if (isHidden) text += ' (hidden)';
+                    if (isLocked) text += ' (locked)';
+                    
+                    div.innerHTML = `<span class="${className}">${text}</span>`;
+                    
+                    // Add click handler
+                    div.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        
+                        // Clear previous selection
+                        const selectedElements = document.querySelectorAll('.tree-item.selected');
+                        selectedElements.forEach(el => el.classList.remove('selected'));
+                        
+                        // Select this item
+                        div.classList.add('selected');
+                        
+                        // Enable delete button
+                        deleteBtn.disabled = false;
+                        
+                        // Store selected item
+                        selectedItem = {
+                            path: fullPath,
+                            isDir: isDir,
+                            isFile: isFile,
+                            isHidden: isHidden,
+                            isLocked: isLocked,
+                            entry: properties.entry
+                        };
+                        
+                        // If it's a file, switch to file tab and populate form
+                        if (isFile) {
+                            tabs.forEach(t => t.classList.remove('active'));
+                            tabContents.forEach(content => content.classList.remove('active'));
+                            document.getElementById('fileTab').classList.add('active');
+                            document.querySelector('[data-tab="file"]').classList.add('active');
+                            
+                            populateFileForm(properties.entry);
+                            
+                            // Enable edit mode
+                            enterEditMode('file');
+                        }
+                        
+                        // If it's a directory, switch to directory tab and populate form
+                        if (isDir) {
+                            tabs.forEach(t => t.classList.remove('active'));
+                            tabContents.forEach(content => content.classList.remove('active'));
+                            document.getElementById('dirTab').classList.add('active');
+                            document.querySelector('[data-tab="dir"]').classList.add('active');
+                            
+                            populateDirForm(properties.entry);
+                            
+                            // Enable edit mode
+                            enterEditMode('dir');
+                        }
+                    });
+                    
+                    fileSystemTree.appendChild(div);
+                    
+                    if (isDir) {
+                        renderTree(item, level + 1, fullPath);
+                    }
+                });
+            }
+            
+            renderTree(tree);
+        }
+        
+        // Populate file form with existing data
+        function populateFileForm(entry) {
+            // Extract directory and name
+            const dirMatch = entry.match(/dir:\s*"([^"]+)"/) || entry.match(/dir:\s*'([^']+)'/);
+            const nameMatch = entry.match(/name:\s*"([^"]+)"/) || entry.match(/name:\s*'([^']+)'/);
+            
+            if (dirMatch) fileDir.value = dirMatch[1];
+            if (nameMatch) fileName.value = nameMatch[1];
+            
+            // Extract kind
+            const kindMatch = entry.match(/kind:\s*"([^"]+)"/) || entry.match(/kind:\s*'([^']+)'/);
+            if (kindMatch) fileKind.value = kindMatch[1];
+            
+            // Show/hide content/asset based on kind
+            if (fileKind.value === 'image' || fileKind.value === 'audio') {
+                contentField.style.display = 'none';
+                assetNameInput.style.display = 'block';
+                
+                // Check if asset is used
+                const assetMatch = entry.match(/content:ASSETS\.(\w+)/);
+                if (assetMatch) {
+                    assetName.value = assetMatch[1];
+                } else {
+                    assetName.value = '';
+                }
+            } else {
+                contentField.style.display = 'block';
+                assetNameInput.style.display = 'none';
+                
+                // Extract content (simplified - doesn't handle all cases)
+                if (entry.includes('content:`')) {
+                    const contentMatch = entry.match(/content:\`([\s\S]*?)\`/);
+                    if (contentMatch) fileContent.value = contentMatch[1];
+                } else {
+                    const contentMatch = entry.match(/content:\s*"([^"]+)"/) || entry.match(/content:\s*'([^']+)'/);
+                    if (contentMatch) fileContent.value = contentMatch[1];
+                }
+            }
+            
+            // Extract hidden
+            fileHidden.checked = entry.includes('hidden:true');
+            
+            // Extract locked
+            fileLocked.checked = entry.includes('locked:true');
+            
+            // Extract corrupted
+            fileCorrupted.checked = entry.includes('corrupted:true');
+        }
+        
+        // Populate directory form with existing data
+        function populateDirForm(entry) {
+            // Extract path
+            const pathMatch = entry.match(/entryDir\(\s*"([^"]+)"/) || entry.match(/entryDir\(\s*'([^']+)'/);
+            if (pathMatch) dirPath.value = pathMatch[1];
+            
+            // Extract hidden
+            dirHidden.checked = entry.includes('hidden:true');
+            
+            // Extract locked
+            dirLocked.checked = entry.includes('locked:true');
+        }
+        
+        // Enter edit mode
+        function enterEditMode(type) {
+            editMode = true;
+            editModeIndicator.style.display = 'block';
+            deleteBtn.disabled = false;
+            
+            if (type === 'file') {
+                addFileBtn.style.display = 'none';
+                submitFileBtn.style.display = 'inline-block';
+                cancelEditBtn.style.display = 'inline-block';
+            } else {
+                addDirBtn.style.display = 'none';
+                submitDirBtn.style.display = 'inline-block';
+                cancelEditDirBtn.style.display = 'inline-block';
+            }
+            
+            updateStatus(`Editing: ${selectedItem.path}`);
+        }
+        
+        // Generate the output code
+        function generateOutput() {
+            let code = 'const ENTRIES = [\n';
+            
+            entries.forEach((entry, index) => {
+                code += `  ${entry}`;
+                if (index < entries.length - 1) {
+                    code += ',';
+                }
+                code += '\n';
+            });
+            
+            code += '];';
+            
+            outputCode.textContent = code;
+        }
+        
+        // Copy to clipboard
+        copyBtn.addEventListener('click', () => {
+            const text = outputCode.textContent;
+            navigator.clipboard.writeText(text).then(() => {
+                updateStatus('Code copied to clipboard!');
+            }).catch(err => {
+                updateStatus('Failed to copy: ' + err, 'error');
+            });
+        });
+        
+        // Download as JavaScript file
+        downloadBtn.addEventListener('click', () => {
+            const text = outputCode.textContent;
+            const blob = new Blob([text], { type: 'application/javascript' });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'filesystem.js';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            updateStatus('File downloaded as filesystem.js');
+        });
+        
+        // Initial render
+        renderFileSystemTree();
+        generateOutput();
+    </script>
+</body>
+</html>
