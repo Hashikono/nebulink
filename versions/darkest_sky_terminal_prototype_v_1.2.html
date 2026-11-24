@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>The Darkest Sky – Terminal Prototype</title>
+<style>
+  :root{
+    --bg:#0b0c10; --fg:#d9e0ee; --dim:#8b8f9c; --accent:#7aa2f7; --scan:#121318; --green:#a6e3a1; --red:#f38ba8;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  }
+  html,body{height:100%; margin:0; background:var(--bg); color:var(--fg); font-family:var(--mono);}
+  .wrap{max-width:980px; margin:24px auto; padding:16px;}
+  .title{color:var(--accent); margin:0 0 8px 0; font-weight:700;}
+  .crt{border:1px solid #181a20; background:linear-gradient(180deg,#0d0f14,#0a0b10); box-shadow:0 0 0 1px #0a0b10 inset,0 0 30px #000 inset; border-radius:8px;}
+  .term{padding:16px; height:460px; overflow:auto; line-height:1.4; white-space:pre-wrap; word-break:break-word;}
+  .prompt{display:flex; gap:8px; padding:12px 16px; border-top:1px solid #14161b;}
+  .ps1{color:var(--green);} .cwd{color:var(--accent);} .input{flex:1; background:transparent; color:var(--fg); border:0; outline:none; font:inherit;}
+  .dim{color:var(--dim);} .err{color:var(--red);} .ok{color:var(--green);} .hint{color:#cba6f7}
+  .img-frame{display:inline-block; position:relative; background:#05060a; border:1px solid #13141a; padding:6px;}
+  .img-frame img{max-width:100%; image-rendering:pixelated}
+  .spec-wrap{position:relative; display:inline-block}
+  .spec-mask{position:absolute; top:0; left:0; bottom:0; background:var(--bg)}
+  .kbd{background:#11121a; border:1px solid #1a1b23; padding:1px 6px; border-radius:4px}
+  .hr{border-top:1px dashed #1a1c22; margin:10px 0}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1 class="title">NebuLink Remote Terminal</h1>
+    <div class="crt">
+      <div id="term" class="term"></div>
+      <div class="prompt">
+        <span class="ps1"><span id="psuser">guest</span>@<span id="pshost">nebula</span></span>:<span id="cwd" class="cwd">/home/guest</span>$
+        <input id="inp" class="input" autofocus spellcheck="false" autocomplete="off" />
+      </div>
+    </div>
+  </div>
+<script>
+// -------------------------
+// Minimal virtual filesystem
+// -------------------------
+const FILE = (type, content, meta={}) => ({type, content, ...meta});
+const DIR  = (children, meta={}) => ({type:"dir", children, ...meta});
+const LOCK = (meta={}) => ({type:"lock", ...meta});
+
+// Tiny base64 placeholders (replace later during bundling)
+const PNG_DOT = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKAAAACgCAIAAAAErfB6AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAKtSURBVHhe7d2/apNRHIfxvNkyRFoHWweh2MnN1k0QHKXi6CA4eAEd7SC4Cl6AOnsPKugmOFv0AvwDFTQK+mqETAGX7+rwy4EX8vB8pu+WkIezHU66u88PRqsaj8dZdcvlMqtuPp9nDWsymWTV9X2fVTedTrPqVi+ktWBgOAPDGRjOwHAGhjMwnIHhDAxnYDgDwxkYzsBwBoYzMJyB4QwMZ2A4A8N1Ry+uZ9Z9efgxq27v/l5W3WKxyKpruUd28neWVdfyub8f/8iq8wTDGRjOwHAGhjMwnIHhDAxnYDgDwxkYzsBwBoYzMJyB4QwMZ2A4A8MZGM7AcN2tKxcy63a2N7PqPn/7lTWsjcMzWXX9o+9Z68MTDGdgOAPDGRjOwHAGhjMwnIHhDAxnYDgDwxkYzsBwBoYzMJyB4QwMZ2A4A8N1925ezqybb+1n1U1nx1nDarkLdufapay61+9Wf1Ps6sXzWXWeYDgDwxkYzsBwBoYzMJyB4QwMZ2A4A8MZGM7AcAaGMzCcgeEMDGdgOAPDGRiue3J4kFl3Muuz6s5tbWTV7Z49nVXXcjeq5Tu3/FYtPMFwBoYzMJyB4QwMZ2A4A8MZGM7AcAaGMzCcgeEMDGdgOAPDGRjOwHAGhjMwXNM7WS3vN334+jNrWOt4j+zpy7dZdZ5gOAPDGRjOwHAGhjMwnIHhDAxnYDgDwxkYzsBwBoYzMJyB4QwMZ2A4A8MZGK579eB2Zl3Lvao37z9l1e1sb2bVndq/kVX35/hZ1rD870L9l4HhDAxnYDgDwxkYzsBwBoYzMJyB4QwMZ2A4A8MZGM7AcAaGMzCcgeEMDNf0TlaLlntGLdbxfa4WnmA4A8MZGM7AcAaGMzCcgeEMDGdgOAPDGRjOwHAGhjMwnIHhDAxnYDgDwxkYbTT6B3gYTxRvms6/AAAAAElFTkSuQmCC";
+// A slim 256x64 fake spectrogram (replace later)
+const SPEC49 = PNG_DOT; // TODO: swap with real spectrogram_49.png data URI
+const SPEC00 = PNG_DOT; // decoy
+const OBS1 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKAAAACgCAIAAAAErfB6AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAKtSURBVHhe7d2/apNRHIfxvNkyRFoHWweh2MnN1k0QHKXi6CA4eAEd7SC4Cl6AOnsPKugmOFv0AvwDFTQK+mqETAGX7+rwy4EX8vB8pu+WkIezHU66u88PRqsaj8dZdcvlMqtuPp9nDWsymWTV9X2fVTedTrPqVi+ktWBgOAPDGRjOwHAGhjMwnIHhDAxnYDgDwxkYzsBwBoYzMJyB4QwMZ2A4A8N1Ry+uZ9Z9efgxq27v/l5W3WKxyKpruUd28neWVdfyub8f/8iq8wTDGRjOwHAGhjMwnIHhDAxnYDgDwxkYzsBwBoYzMJyB4QwMZ2A4A8MZGM7AcN2tKxcy63a2N7PqPn/7lTWsjcMzWXX9o+9Z68MTDGdgOAPDGRjOwHAGhjMwnIHhDAxnYDgDwxkYzsBwBoYzMJyB4QwMZ2A4A8N1925ezqybb+1n1U1nx1nDarkLdufapay61+9Wf1Ps6sXzWXWeYDgDwxkYzsBwBoYzMJyB4QwMZ2A4A8MZGM7AcAaGMzCcgeEMDGdgOAPDGRiue3J4kFl3Muuz6s5tbWTV7Z49nVXXcjeq5Tu3/FYtPMFwBoYzMJyB4QwMZ2A4A8MZGM7AcAaGMzCcgeEMDGdgOAPDGRjOwHAGhjMwXNM7WS3vN334+jNrWOt4j+zpy7dZdZ5gOAPDGRjOwHAGhjMwnIHhDAxnYDgDwxkYzsBwBoYzMJyB4QwMZ2A4A8MZGK579eB2Zl3Lvao37z9l1e1sb2bVndq/kVX35/hZ1rD870L9l4HhDAxnYDgDwxkYzsBwBoYzMJyB4QwMZ2A4A8MZGM7AcAaGMzCcgeEMDNf0TlaLlntGLdbxfa4WnmA4A8MZGM7AcAaGMzCcgeEMDGdgOAPDGRjOwHAGhjMwnIHhDAxnYDgDwxkYbTT6B3gYTxRvms6/AAAAAElFTkSuQmCC";
+const OBS2   = PNG_DOT;
+const OBS3   = PNG_DOT;
+const RVN_A  = PNG_DOT;
+
+// Dates: mid-Dec 1990 → early Jan 1991
+const FS = {
+  "/": DIR(["bin","boot","dev","etc","home","lib","media","mnt","opt","proc","root","srv","sys","tmp","usr","var"]),
+  "/bin": DIR(["ls","cat","cd","pwd","less","head","tail","echo","strings","hexdump","spectrogram","open","sudo","chmod","man","date","time","clear"]),
+  "/boot": DIR(["grub"]),
+  "/boot/grub": DIR(["grub.cfg"]),
+  "/boot/grub/grub.cfg": FILE("text", `set default=0\nmenuentry "Observatory" { linux /vmlinuz quiet splash }\n# NOTE: b68 aligned first; ravenwood offset unknown.\n`),
+
+  "/dev": DIR(["null","random","void","mic0"]),
+  "/dev/null": FILE("text", ""),
+  "/dev/random": FILE("text", "7z9*^..\n"),
+  "/dev/void": FILE("text", "0 entries. 0 exits.\n"),
+  "/dev/mic0": FILE("text", "[warn] mic muted\n"),
+
+  "/etc": DIR(["motd","observatory.conf","hosts","hostname","passwd","shadow"]),
+  "/etc/motd": FILE("text", "Welcome, Observer. In this machine, nothing exists—except what you choose to see.\n"),
+  "/etc/observatory.conf": FILE("text", "TARGETS=B68,RAVENWOOD\nARRAY_ORIENTATION=NORTHWEST\nDATA_CACHE=.cache\nNOTES=Prefer canonical targets; discard artifacts.\n"),
+  "/etc/hosts": FILE("text", "127.0.0.1 localhost\n"),
+  "/etc/hostname": FILE("text", "█████ █████ Observatory\n"),
+  "/etc/passwd": FILE("text", "root:x:0:0:root:/root:/bin/sh\nastronomer:x:1000:1000:/home/astronomer:/bin/sh\nguest:x:1001:1001:/home/guest:/bin/sh\numbra:x:1002:1002:/home/umbra:/bin/sh\n"),
+  "/etc/shadow": LOCK({reason:"Permission denied"}),
+
+  "/home": DIR(["guest","astronomer","umbra"],{}),
+  "/home/astronomer": LOCK({reason:"Permission denied"}),
+  "/home/umbra": LOCK({reason:"not authorized for user 'umbra'"}),
+  "/home/guest": DIR(["README.txt","cipher_primer.txt","cipher1.txt","notes.txt",".trash"],{}),
+  "/home/guest/README.txt": FILE("text", `Eleanor Ridge Terminal (Dec 1990)\nYour badge was accepted.\nType \`help\` to see commands. Try \`ls\`, \`cat\`, \`open\`.\n`),
+  "/home/guest/cipher_primer.txt": FILE("text", `A short note on classical ciphers.\nThe Vigenère tableau organizes shifted alphabets across a grid.\nPattern-seeking—sometimes called pareidolia—misleads novice analysts.\n(Seasoned analysts still see faces in the dark.)\n`),
+  "/home/guest/cipher1.txt": FILE("text", `GVVDS CVYMZ ZV PTU ZRMZC ZME QNZUPU\n`), // TODO real ciphertext
+  "/home/guest/notes.txt": FILE("text", `The analyst before me loved classical ciphers.\nPatterns breed confidence; confidence breeds mistakes.\n`),
+  "/home/guest/.trash": DIR(["old.tmp","z543.final","._._._"],{hidden:true}),
+  "/home/guest/.trash/old.tmp": FILE("text","(empty)\n",{hidden:true}),
+  "/home/guest/.trash/z543.final": FILE("text","UMBRA: last login unknown\n",{hidden:true}),
+  "/home/guest/.trash/._._._": FILE("text","STOP TUNING IT WILL TUNE BACK\n",{hidden:true}),
+
+  "/lib": DIR([]), "/media": DIR([]), "/mnt": DIR([]),
+
+  "/opt": DIR(["analyzer","artifacts"]),
+  "/opt/analyzer": DIR(["README.md"]),
+  "/opt/analyzer/README.md": FILE("text", `When dumps appear corrupted:\n - Padding bytes = 0x00; strip them.\n - Try XOR with 0x13 or 0x37; then run \`strings\`.\n - Beware artifacts. The loudest path is not always true.\n`),
+  "/opt/artifacts": DIR(["old-scan.img","ravenwood-press.pdf"]),
+  "/opt/artifacts/old-scan.img": FILE("text","binary image header... (useless)\n"),
+  "/opt/artifacts/ravenwood-press.pdf": FILE("text","Funding memo: Ravenwood alignment pending.\n"),
+
+  "/proc": DIR(["uplink"]),
+  "/proc/uplink": FILE("text","link: down\n"),
+
+  "/root": LOCK({reason:"Permission denied"}),
+  "/root/keys": LOCK({reason:"Permission denied"}),
+
+  "/srv": DIR([]),
+  "/sys": DIR(["array"]),
+  "/sys/array": DIR(["state"]),
+  "/sys/array/state": FILE("text","nominal\n"),
+
+  "/tmp": DIR(["scratch.tmp"]),
+  "/tmp/scratch.tmp": FILE("text","todo: rotate backups\n"),
+
+  "/usr": DIR(["share"]),
+  "/usr/share": DIR(["man"]),
+  "/usr/share/man": DIR(["man1"]),
+  "/usr/share/man/man1": DIR(["void.1","spectrogram.1"]),
+  "/usr/share/man/man1/void.1": FILE("text", `NAME\n  void — absence mistaken for a signal\nDESCRIPTION\n  If you stare long enough into nothing, it learns your name.\n`),
+  "/usr/share/man/man1/spectrogram.1": FILE("text", `NAME\n  spectrogram — render amplitude vs frequency vs time\nNOTES\n  Some instruments record what they were never built to hear.\n`),
+
+  "/var": DIR(["log","observatory"]),
+  "/var/log": DIR(["system.log","access.log"]),
+  "/var/log/system.log": FILE("text", `[init] cache daemon started → /var/observatory/b68/.cache\n[net] link quality 4/5\n[warn] mic0 driver loaded (disabled)\n`),
+  "/var/log/access.log": FILE("text", `[auth] badge accepted (guest)\n[auth] escalate denied (guest→astronomer)\n`),
+
+  "/var/observatory": DIR(["b68","ravenwood"]),
+
+  // === Canonical path: B68 ===
+  "/var/observatory/b68": DIR(["README.txt","journal.txt","observation1.img","observation2.img","observation3.img","device_error.log","device_error2.log","device_diag.txt","signals","cycles",".cache","logs","vault"],{}),
+  "/var/observatory/b68/README.txt": FILE("text","B68 — Barnard 68: canonical target\n\"Nothing should be here.\"\nType: open observation1.img\n"),
+  "/var/observatory/b68/journal.txt": FILE("text", `Night 7: Pointed at nothing. The subtraction left a remainder.\nNight 12: Power fault. A microphone I never enabled wrote a file. (49)\nNight 18: Artifacts in the dump. Even garbage has order. (59)\nNight 20: The cycle aligns on its own. Use today. (20)\n`),
+  "/var/observatory/b68/observation1.img": FILE("image", OBS1, {caption:"Observation 1 (B68) — low-res plate"}),
+  "/var/observatory/b68/observation2.img": FILE("image", OBS2, {caption:"Observation 2 (B68) — decoy"}),
+  "/var/observatory/b68/observation3.img": FILE("image", OBS3, {caption:"Observation 3 (B68) — decoy"}),
+  "/var/observatory/b68/device_error.log": FILE("text", `[1990-12-15 03:41:09] Array power failure. Auto-reboot aborted.\n[1990-12-15 03:41:12] INTERNAL MIC: saved /var/observatory/b68/.cache/audio/error01.ogg\n[1990-12-15 03:41:16] Operator: I did not enable this. Who toggled it?\n[1990-12-15 03:42:00] Fuse replaced. Instruments nominal.\n`),
+  "/var/observatory/b68/device_error2.log": FILE("text", `[1990-12-17 00:11:00] Mic test. No anomalies. (no file saved)\n`),
+  "/var/observatory/b68/device_diag.txt": FILE("text", `Board: ARR-16\nTempC: 41.8\nPSU: OK\nMic0: disabled by config\n`),
+  "/var/observatory/b68/signals": DIR(["signal01.raw","signal02.raw","signal03.txt","signal_live.txt"]),
+  "/var/observatory/b68/signals/signal01.raw": FILE("text", `6f 2a 00 2b 46 00 8c 00 21 00 38 00 00 00 5a 00 2e 00 33 00 00 00\n`),
+  "/var/observatory/b68/signals/signal02.raw": FILE("text", `4e 4f 00 50 52 49 4d 41 52 59 00 44 49 47 49 54 53 00\n`),
+  "/var/observatory/b68/signals/signal03.txt": FILE("text", `14 21 14 21 14 21 ... (call/response)\n`),
+  "/var/observatory/b68/signals/signal_live.txt": FILE("text", `[00:00] 7 1 7 1 7 1\n[00:05] 7 1 7 1 7 1\n(repeats)\n`),
+  "/var/observatory/b68/cycles": DIR(["cycle.log","weekly.log","cycles.csv"]),
+  "/var/observatory/b68/cycles/cycle.log": FILE("text", `Night 1:  █ ░ █ ░ █ ░\nNight 2:  ░ █ ░ █ ░ █\nNight 3:  █ █ ░ ░ █ █\nNight 4:  ░ ░ █ █ ░ ░\nNight 5:  █ ░ ░ █ █ ░\nNight 6:  ░ █ █ ░ ░ █\nNight 7:  █ █ █ ░ ░ ░\n(█=1, ░=0)  Use today.\n`),
+  "/var/observatory/b68/cycles/weekly.log": FILE("text", `Mon: A C F\nTue: B E\nWed: A D F\nThu: C\nFri: B D\nSat: —\nSun: —\n`),
+  "/var/observatory/b68/cycles/cycles.csv": FILE("text", `date,burst\n12-20,0.23\n12-22,0.22\n12-24,0.24\n12-31,0.30\n`),
+  "/var/observatory/b68/.cache": DIR(["audio"],{hidden:true}),
+  "/var/observatory/b68/.cache/audio": DIR(["error01.ogg"],{hidden:true}),
+  "/var/observatory/b68/.cache/audio/error01.ogg": FILE("audio", SPEC49, {note:"render with spectrogram"}),
+  "/var/observatory/b68/logs": DIR(["1990-12-15.log","1990-12-24.log","1990-12-31.latest","1991-01-03.log","1991-01-10.log"]),
+  "/var/observatory/b68/logs/1990-12-15.log": FILE("text", `Night 12. Power fault; mic recorded to .cache/audio/error01.ogg\nI did not enable it.  (49)\n`),
+  "/var/observatory/b68/logs/1990-12-24.log": FILE("text", `Night 18. Corruption in dump. Strip the padding; the rest feels… deliberate. (59)\n`),
+  "/var/observatory/b68/logs/1990-12-31.latest": FILE("text", `Night 20. The cycle aligns on its own. Use today. (20)\nArchive in reading order: newest → oldest.\nHappy New Year.\n`),
+  "/var/observatory/b68/logs/1991-01-03.log": FILE("text", `Maintenance. Greetings to 1991. No anomalies logged.\n`),
+  "/var/observatory/b68/logs/1991-01-10.log": FILE("text", `Silence. Heavier than before.\n`),
+  "/var/observatory/b68/vault": DIR(["final.txt","alignment.note","seal.txt"]),
+  "/var/observatory/b68/vault/final.txt": FILE("text", `COLLECTED: 49 / 59 / 20\nORDER: INCORRECT\n(seal requires reading order)\n`),
+  "/var/observatory/b68/vault/alignment.note": FILE("text", `Chronology matters. Read newest → oldest when sealing the record.\n`),
+  "/var/observatory/b68/vault/seal.txt": FILE("text", `To seal a record, enter nights in archival order.\n`),
+
+  // === Decoy path: Ravenwood ===
+  "/var/observatory/ravenwood": DIR(["observationA.img","observationB.img","journal.txt","signals","artifacts",".cache","vault"]),
+  "/var/observatory/ravenwood/observationA.img": FILE("image", RVN_A, {caption:"Ravenwood Observation A"}),
+  "/var/observatory/ravenwood/observationB.img": FILE("image", RVN_A, {caption:"Ravenwood Observation B"}),
+  "/var/observatory/ravenwood/journal.txt": FILE("text", `Night 3: RAVENWOOD is awake. The instruments sing if I listen long enough.\nNight 4: The live station cycles as if it knows I'm watching.\nNight 9: Keys and gates. I will thread the circle only once.\n`),
+  "/var/observatory/ravenwood/signals": DIR(["station.rvd","station.key"]),
+  "/var/observatory/ravenwood/signals/station.key": FILE("text", `SHIFT: Lagrange\nPAIR: 3-1-4-1-5-9\nAPERTURE: circle\n`),
+  "/var/observatory/ravenwood/signals/station.rvd": FILE("text", `RVD/1.0\nFRAME 0001\nPAYLOAD START\n...\nFRAME 0002\n...\n(open /var/observatory/ravenwood/vault/gate.txt)\n`),
+  "/var/observatory/ravenwood/artifacts": DIR(["alignments.tab"]),
+  "/var/observatory/ravenwood/artifacts/alignments.tab": FILE("text", `theta rho offset\n0.1  0.8  -1\n0.2  0.6  -1\n0.4  0.4  -1\n0.8  0.2  -1\n# total offset -4\n# this line looks important but isn't\n`),
+  "/var/observatory/ravenwood/.cache": DIR(["spectrograms"],{hidden:true}),
+  "/var/observatory/ravenwood/.cache/spectrograms": DIR(["live.ogg"],{hidden:true}),
+  "/var/observatory/ravenwood/.cache/spectrograms/live.ogg": FILE("audio", SPEC00, {note:"decoy: flat"}),
+  "/var/observatory/ravenwood/vault": DIR(["gate.txt","circle.log"]),
+  "/var/observatory/ravenwood/vault/gate.txt": FILE("text", `CIRCLE ONE.\nCIRCLE AGAIN.\nCIRCLE THRICE.\nWHEN YOU COMPLETE THE CIRCLE, YOU WILL FIND THERE WAS NO GATE.\n`),
+  "/var/observatory/ravenwood/vault/circle.log": FILE("text", `00 01 01 02 03 05 08 13 21\n# you completed the circle\n# there was no gate\n# return to the canonical target\n`),
+};
+
+// -------------------------
+// Terminal implementation
+// -------------------------
+const term = document.getElementById('term');
+const inp = document.getElementById('inp');
+const cwdSpan = document.getElementById('cwd');
+let CWD = "/home/guest";
+let LOGGED_IN = true;           // set to false later when we add real login
+let USER = "guest";
+let TARGET_HOST = "█████ ████ Observatory";
+
+function setPrompt(){
+  document.getElementById('psuser').textContent = USER;
+  document.getElementById('pshost').textContent = 'nebula'; // replace with sanitized host later
+}
+setPrompt();
+
+function print(txt=""){ term.appendChild(document.createTextNode(txt+"\n")); term.scrollTop = term.scrollHeight; }
+function printHTML(html){ const d=document.createElement('div'); d.innerHTML=html; term.appendChild(d); term.scrollTop=term.scrollHeight; }
+function setCwd(p){ CWD=p; cwdSpan.textContent=p; }
+
+function resolve(path){
+  if(!path) return CWD;
+  if(path.startsWith('/')) return normalize(path);
+  return normalize(CWD + (CWD.endsWith('/')?"":"/") + path);
+}
+function normalize(p){
+  const parts = p.split('/');
+  const out=[];
+  for(const seg of parts){
+    if(!seg||seg==='.') continue;
+    if(seg==='..') out.pop(); else out.push(seg);
+  }
+  return '/'+out.join('/');
+}
+function node(path){ return FS[path]; }
+function exists(path){ return !!FS[path]; }
+function isDir(n){ return n && n.type==="dir"; }
+function isLocked(n){ return n && n.type==="lock"; }
+
+function ls(path, all=false){
+  const p = resolve(path);
+  const n = node(p);
+  if(!n) return `ls: cannot access '${path||""}': No such file or directory`;
+  if(!isDir(n)) return `${p}`;
+  const list = n.children||[];
+  const display = list.filter(name=> all || !name.startsWith('.') ).map(x=>x).join("  ");
+  return display;
+}
+
+function cd(path){
+  if(!path){ setCwd("/home/guest"); return; }
+  const p=resolve(path); const n=node(p);
+  if(!n) return `cd: ${path}: No such file or directory`;
+  if(isLocked(n)) return n.reason||"Permission denied";
+  if(!isDir(n)) return `cd: not a directory: ${path}`;
+  setCwd(p);
+  return null;
+}
+
+function cat(path){
+  const p=resolve(path); const n=node(p);
+  if(!n) return `cat: ${path}: No such file or directory`;
+  if(isLocked(n)) return n.reason||"Permission denied";
+  if(n.type!=="text") return `cat: ${path}: not a text file`;
+  return n.content;
+}
+
+function openFile(path){
+  const p = resolve(path); const n = node(p);
+  if(!n) return `open: ${path}: No such file or directory`;
+  if(n.type!=="image") return `open: ${path}: not an image`;
+
+  const src = n.content || "";
+  if(!/^data:image\/(png|jpeg|jpg|gif);base64,/.test(src)){
+    return `open: ${path}: invalid data URI (expected data:image/*;base64,...)`;
+  }
+
+  const wrap = document.createElement('div');
+  wrap.className = 'img-frame';
+  const img = new Image();
+  img.src = src;
+  img.alt = p;
+  img.style.display = 'block';
+  img.style.maxWidth = '100%';
+  img.style.imageRendering = 'pixelated';
+  const cap = document.createElement('div');
+  cap.className = 'dim';
+  cap.style.marginTop = '6px';
+  cap.textContent = n.caption || p;
+
+  wrap.appendChild(img);
+  wrap.appendChild(cap);
+  term.appendChild(wrap);
+  term.scrollTop = term.scrollHeight;
+  return null;
+}
+
+
+function spectrogram(path){
+  const p = resolve(path); const n = node(p);
+  if(!n) return `spectrogram: ${path}: No such file or directory`;
+  if(n.type!=="audio") return `spectrogram: ${path}: not an audio file`;
+
+  const src = n.content || "";
+  if(!/^data:image\/(png|jpeg|jpg|gif);base64,/.test(src)){
+    return `spectrogram: ${path}: invalid spectrogram image data URI`;
+  }
+
+  const outer = document.createElement('div');
+  outer.className = 'img-frame spec-wrap';
+  const img = new Image();
+  img.src = src;
+  img.alt = p;
+  img.className = 'spec-img';
+  img.style.display = 'block';
+  img.style.maxWidth = '100%';
+  img.style.imageRendering = 'pixelated';
+
+  const mask = document.createElement('div');
+  mask.className = 'spec-mask';
+  mask.style.width = '100%';
+  mask.style.left = '0px';
+  mask.style.right = 'auto';
+
+  outer.appendChild(img);
+  outer.appendChild(mask);
+  term.appendChild(outer);
+  term.scrollTop = term.scrollHeight;
+
+  img.onload = () => {
+    const w = img.naturalWidth || outer.getBoundingClientRect().width || 400;
+    let x = 0; 
+    const step = 4;   // pixels per tick
+    const ms = 12;    // ms per tick
+    mask.style.width = w + 'px';
+
+    const id = setInterval(() => {
+      x += step;
+      mask.style.left = x + 'px';
+      if (x >= w) {
+        clearInterval(id);
+        term.appendChild(document.createTextNode('\n'));
+        term.scrollTop = term.scrollHeight;
+      }
+    }, ms);
+  };
+
+  return null;
+}
+
+
+
+function hexdump(path){
+  const p=resolve(path); const n=node(p);
+  if(!n) return `hexdump: ${path}: No such file or directory`;
+  if(n.type!=="text") return `hexdump: ${path}: not a raw text source`;
+  // naive format: already hex pairs separated by spaces
+  const bytes = n.content.trim().split(/\s+/);
+  let out='';
+  for(let i=0;i<bytes.length;i+=16){
+    const row = bytes.slice(i,i+16).join(' ');
+    out += row + "\n";
+  }
+  return out;
+}
+
+function stringsCmd(path){
+  const p=resolve(path); const n=node(p);
+  if(!n) return `strings: ${path}: No such file or directory`;
+  // Provide canned outputs for a few decoys
+  if(p.endsWith('/var/observatory/ravenwood/signals/station.rvd')){
+    return `RVD/1.0\nFRAME 0001\nPAYLOAD START\n...\nFRAME 0002\n...\nopen /var/observatory/ravenwood/vault/gate.txt\n`;
+  }
+  if(p.endsWith('/var/observatory/ravenwood/.cache/spectrograms/live.ogg')){
+    return `LIVE: OFFLINE REPLAY\nMIRRORS MAKE GATES FROM NOTHING\n`;
+  }
+  if(p.endsWith('/var/observatory/b68/signals/signal01.raw')){
+    return `(hint) strip 00, XOR 0x13, then read printables → first number token is 59\n`;
+  }
+  return "(no printable strings)\n";
+}
+
+function man(topic){
+  if(topic==="void") return node('/usr/share/man/man1/void.1').content;
+  if(topic==="spectrogram") return node('/usr/share/man/man1/spectrogram.1').content;
+  return `No manual entry for ${topic}`;
+}
+
+function dateCmd(){
+  const d=new Date(); return d.toDateString();
+}
+function timeCmd(){
+  const d=new Date(); return d.toLocaleTimeString();
+}
+
+function help(){
+  return (
+    `Available commands:
+    help               show this help message
+    ls [-a] [path]     list files (use -a to show hidden)
+    cd <dir>           change directory (.. to go up)
+    pwd                print working directory
+    cat <file>         print a text file
+    open <image>       view an image (PNG/JPG)
+    spectrogram <ogg>  render a spectrogram image slowly
+    hexdump <file>     pretty-print hex bytes
+    strings <file>     show printable strings (canned for some files)
+    man <topic>        mini manual (try: void, spectrogram)
+    date / time        show current date or time
+    clear              clear screen
+    whoami             show user
+    `);
+}
+
+
+function listChildren(path, all=false){
+  const n=node(path); if(!n||!isDir(n)) return [];
+  return (n.children||[]).filter(name=> all || !name.startsWith('.'));
+}
+
+function run(cmdline){
+  const out=[];
+  const parts = cmdline.trim().match(/[^\s"']+|"([^"]*)"|'([^']*)'/g) || [];
+  const cmd = (parts[0]||"").toLowerCase();
+  const args = parts.slice(1).map(s=>s.replace(/^['"]|['"]$/g,''));
+  if(!cmd) return;
+  switch(cmd){
+    case 'help': out.push(help()); break;
+    case 'whoami': out.push(USER); break;
+    case 'clear': term.textContent=''; break;
+    case 'pwd': out.push(CWD); break;
+    case 'date': out.push(dateCmd()); break;
+    case 'time': out.push(timeCmd()); break;
+    case 'echo': out.push(args.join(' ')); break;
+    case 'man': out.push(man(args[0]||'')); break;
+    case 'ls': {
+      let showAll=false, target='';
+      for(const a of args){ if(a==='-a') showAll=true; else target=a; }
+      out.push(ls(target, showAll));
+      break;
+    }
+    case 'cd': {
+      const msg = cd(args[0]); if(msg) out.push(msg); break;
+    }
+    case 'cat': out.push(cat(args[0])); break;
+    case 'open': {
+      const msg = openFile(args[0]); if(msg) out.push(msg); break;
+    }
+    case 'spectrogram': {
+      const msg = spectrogram(args[0]); if(msg) out.push(msg); break;
+    }
+    case 'hexdump': out.push(hexdump(args[0])); break;
+    case 'strings': out.push(stringsCmd(args[0])); break;
+    case 'head': {
+      const t=cat(args[0]); if(typeof t==="string"){ out.push(t.split(/\n/).slice(0,10).join('\n')); } else out.push(t);
+      break;
+    }
+    case 'tail': {
+      const t=cat(args[0]); if(typeof t==="string"){ const lines=t.split(/\n/); out.push(lines.slice(Math.max(0,lines.length-10)).join('\n')); } else out.push(t);
+      break;
+    }
+    case 'sudo': out.push('You are not root here.'); break;
+    case 'chmod': out.push('ok'); break;
+    default: out.push(`${cmd}: command not found`);
+  }
+  if(out.length){ print(out.join('\n')); }
+}
+
+function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+async function boot(){
+  printHTML(`<span class="dim">NebuLink Remote v0.9.2</span>`);
+  await sleep(250);
+  print("Initializing session...");
+  await sleep(300);
+  print("Target: █████ ████ Observatory");
+  await sleep(350);
+  print("Status: connected");
+  await sleep(250);
+  print("");
+  print(cat('/etc/motd'));
+  await sleep(250);
+  print("Login as: guest");
+  await sleep(200);
+  // Story-aligned: logs go through 1991-01-10 → make last login just before that
+  print("Last login: Thu Jan 10 1991 23:08:12 PST on ttyS1");
+  await sleep(200);
+  print("Dec 1990 — Jan 1991");
+  await sleep(150);
+  print("Type 'help' for commands.");
+}
+
+boot();
+
+// simple command history
+const history = [];
+let histIndex = -1;
+
+inp.addEventListener('keydown', (e)=>{
+  if(e.key === 'Enter'){
+    const cmd = inp.value;
+    inp.value = '';
+
+    // echo prompt + command
+    const psUser = document.getElementById('psuser').textContent;
+    const psHost = document.getElementById('pshost').textContent;
+    printHTML(
+      `<span class="dim">${psUser}@${psHost}</span>:` +
+      `<span class="cwd">${CWD}</span>$ ${cmd}`
+    );
+
+    // push to history (skip empty)
+    if(cmd.trim().length) {
+      history.push(cmd);
+      histIndex = history.length; // next Up will pull last command
+    }
+
+    run(cmd);
+  }
+  else if(e.key === 'ArrowUp'){
+    if(history.length && histIndex > 0){
+      histIndex--;
+      inp.value = history[histIndex];
+      // move cursor to end
+      inp.setSelectionRange(inp.value.length, inp.value.length);
+      e.preventDefault();
+    } else if(history.length && histIndex === history.length){
+      // first press after a command
+      histIndex = history.length - 1;
+      inp.value = history[histIndex];
+      inp.setSelectionRange(inp.value.length, inp.value.length);
+      e.preventDefault();
+    }
+  }
+  else if(e.key === 'ArrowDown'){
+    if(history.length && histIndex < history.length - 1){
+      histIndex++;
+      inp.value = history[histIndex];
+      inp.setSelectionRange(inp.value.length, inp.value.length);
+      e.preventDefault();
+    } else if(history.length){
+      // past the newest → clear
+      histIndex = history.length;
+      inp.value = '';
+      e.preventDefault();
+    }
+  }
+});
+
+
+</script>
+</body>
+</html>
