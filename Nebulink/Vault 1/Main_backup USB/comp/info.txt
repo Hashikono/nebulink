@@ -1,0 +1,12 @@
+NebuLink is an experimental remote-access terminal client.  
+Your target is a UNIX system. (virtual computer)
+
+Please read carefully.
+If you’re new to UNIX, type `help` or ask for a manual. If you see ███, read around it.
+We recommend asking Google for UNIX basics if you’re lost.
+
+You play as the inheritor of a worn-down key/USB in the year █████. This key was found in an untouched drawer in your house...the one section of your aboad that isn’t plagued with CCTV cameras...
+
+External tools (for decryption, analysis) may be required. Use them to your advantage. 
+
+The system does not permit the use of AI nor the internet, having been banned by the government since the Proclamation of 1893

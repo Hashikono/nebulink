@@ -1,0 +1,76 @@
+[] Brief guide to navigating the unix based system:
+*Type help for the list of commands
+
+
+
+[] Basic syntax/way of typing:
+*[command] [file/folder]
+
+
+
+[] 'cd' command:
+*Used to navigate through folders (also known as directories)
+*The computer is very adamant about correct spelling of all files and folders
+
+cd /
+*Goes to the parent folder (the folder that holds everything)
+
+cd .. 
+*Goes back one folder
+
+cd guest
+*Goes into the folder bob if it exists in the folder
+
+cd /home/guest
+*No matter where you are, the system will transport you into the folder home and if it exists, will transport you to guest
+*NOTE if a folder is in a folder, you have to type both the folder it is in and the folder
+Ex. the "guest" folder is in "home" and "home" is in the main folder (the main file is the start), so you must type /home/guest to go to "guest folder"
+
+
+
+[] Opening files:
+*You can only open files in the folder you're in
+
+cat hacker.txt
+*Opens the "hacker" text file
+
+
+
+[] Viewing where you are:
+*The place where you are typing your commands also shows what folder you're in
+
+guest@250.34.122.20:/home/guest $
+*User is currently in the /home/guest folder or "guest" folder for short
+
+
+
+[] General guide:
+* READ EVERYTHING
+* Write down all of the codes you find especially about important details IMMEDIATELY
+* Every file has a purpose
+* Some files/folders are hidden and must be directly cd'ed into or read
+* Things in quotes, caps, and next to symbols are important
+* Believe everything
+* Don't believe everything
+* Ciphers are majorly involved
+* Some files are locked
+* This computer is meant to be explored...explore and read everything
+* Note down numbers but don't overthink the ones with symbols next to them
+* Most tools in the "help" command will be used
+* Ciphers are widely used
+* Use Hexdumps when you can't read a file
+* If you softlock the code, you might have to reconnect again
+
+
+
+[] Intended Progression:
+1. Access Nebulink with the right access information
+2. Look through accessible files
+3. Access hidden folder
+4. Look through the folders within the hidden folder
+5. Find the code through the symbols
+6. Access Vault 2
+
+All folder.7z passwords are in numbers
+
+Thank you "miknawheaj" for being our test subject :D

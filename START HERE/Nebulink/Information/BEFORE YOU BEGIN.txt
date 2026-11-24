@@ -1,0 +1,31 @@
+You need to download 7z application (windows computer) to access these files... (or find an extractor online?)
+*These files are "7z" zip files and require a password to open them (You need to extract them with the website)
+*when putting in passwords, get rid of all spaces
+
+
+To extract a password-protected file from a 7-Zip archive, right-click the file, select 7-Zip > Extract Here or Extract files..., and enter the correct password when prompted, which will then decrypt and extract the file to your chosen location. 
+Step-by-step instructions: 
+- Locate: the password-protected archive file you want to extract.
+- Right-click: the file.
+- Hover over: the 7-Zip option in the context menu.
+- Select: either Extract Here to extract the files to the same folder as the archive, or Extract files... to choose a different destination folder.
+- Enter the password: in the password prompt dialog box.
+- Click: OK.
+
+Additionally you need to open the included decoder (CyberChef)
+- Extract/unzip the files to a folder of your choosing by right clicking it
+- Open the now unzipped file and open "CyberChef_v11.6.0"
+- The decoder should open in your browser
+- Use this tool to decrypt any messages you come across
+(Credits to CyberChef for making this awesome tool)
+
+Rules: 
+- Do not use the internet
+- Do not use AI
+- Everything can be solved offline...
+- Read the article, it might be useful
+- Only .7z files need passwords
+
+Hint for "Vault 1":
+
+205949
