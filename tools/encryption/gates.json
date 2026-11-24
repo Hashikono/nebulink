@@ -1,0 +1,13 @@
+{
+  "iterations": 250000,
+
+  "easter": { "key": "rm -rf /*" },
+
+  "login": { "ip": "250.34.122.20", "user": "guest", "pass": "UEGVAH" },
+
+  "gates": [
+    { "parent": "/var/observatory",                  "name": "eridanus"    },
+    { "parent": "/var/observatory/eridanus/b68",     "name": ".cache"      },
+    { "parent": "/var/observatory/eridanus/b68/log", "name": "error00.log" }
+  ]
+}

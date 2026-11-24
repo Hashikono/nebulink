@@ -1,0 +1,13 @@
+{
+  "name": "nebulink-vaults",
+  "private": true,
+  "type": "module",
+  "description": "Build tool for the NebuLink puzzle: encrypted vaults + obfuscated single-line script",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node test/verify.cjs && node test/shell.cjs"
+  },
+  "dependencies": {
+    "javascript-obfuscator": "5.10.1"
+  }
+}
